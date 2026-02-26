@@ -1,0 +1,66 @@
+// Organic Programming — OP Service Contract
+//
+// OP is the unified entry point to the Organic Programming ecosystem.
+// It discovers holons, dispatches commands, and promotes Sophia's
+// identity verbs for convenience.
+
+syntax = "proto3";
+
+package op.v1;
+
+import "sophia_who/v1/sophia_who.proto";
+
+option go_package = "github.com/organic-programming/grace-op/gen/go/op/v1;opv1";
+
+// OPService is the unified Organic Programming dispatcher.
+service OPService {
+  // --- OP's own RPCs ---
+
+  // Discover scans for all known holons (local and cached).
+  rpc Discover (DiscoverRequest) returns (DiscoverResponse);
+
+  // Invoke dispatches a command to a holon by name.
+  rpc Invoke (InvokeRequest) returns (InvokeResponse);
+
+  // --- Promoted from Sophia Who? (identity management) ---
+
+  // CreateIdentity creates a new holon identity.
+  rpc CreateIdentity (sophia_who.v1.CreateIdentityRequest) returns (sophia_who.v1.CreateIdentityResponse);
+
+  // ListIdentities lists all known holon identities.
+  rpc ListIdentities (sophia_who.v1.ListIdentitiesRequest) returns (sophia_who.v1.ListIdentitiesResponse);
+
+  // ShowIdentity retrieves a holon's identity by UUID.
+  rpc ShowIdentity (sophia_who.v1.ShowIdentityRequest) returns (sophia_who.v1.ShowIdentityResponse);
+}
+
+// --- Discover ---
+
+message DiscoverRequest {
+  string root_dir = 1;  // Directory to scan. Default: current dir.
+}
+
+message DiscoverResponse {
+  repeated HolonEntry entries = 1;
+  repeated string path_binaries = 2;  // Holon binaries found in $PATH.
+}
+
+message HolonEntry {
+  sophia_who.v1.HolonIdentity identity = 1;
+  string origin = 2;  // "local" or "cached"
+}
+
+// --- Invoke ---
+
+message InvokeRequest {
+  string holon = 1;            // Holon name or alias (e.g. "who", "atlas").
+  repeated string args = 2;    // Arguments to pass to the holon.
+}
+
+message InvokeResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+}
+
+// --- Identity (promoted from Sophia) ---
