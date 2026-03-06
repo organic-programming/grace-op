@@ -92,9 +92,14 @@ Direct gRPC URI dispatch:
 
 OP commands:
   op check [<holon-or-path>]             validate holon.yaml and prerequisites
-  op build [<holon-or-path>]             build a holon artifact via its runner
+  op build [<holon-or-path>] [flags]     build a holon artifact via its runner
   op test [<holon-or-path>]              run a holon's test contract
   op clean [<holon-or-path>]             remove .op/ build outputs
+
+Build flags:
+  --target <macos|linux|windows|ios|android>   platform target (default: current OS)
+  --mode <debug|release|profile>               build mode (default: debug)
+  --dry-run                                    print resolved plan, do not execute
   op discover                            list available holons
   op serve [--listen tcp://:9090]        start OP's own gRPC server
   op version                             show op version

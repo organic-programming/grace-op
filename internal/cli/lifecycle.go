@@ -10,17 +10,38 @@ import (
 )
 
 func cmdLifecycle(format Format, operation holons.Operation, args []string) int {
-	if len(args) > 1 {
+	// Parse build-specific flags before the positional argument.
+	var opts holons.BuildOptions
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--target" && i+1 < len(args):
+			opts.Target = args[i+1]
+			i++
+		case args[i] == "--mode" && i+1 < len(args):
+			opts.Mode = args[i+1]
+			i++
+		case args[i] == "--dry-run":
+			opts.DryRun = true
+		case strings.HasPrefix(args[i], "--"):
+			fmt.Fprintf(os.Stderr, "op %s: unknown flag %q\n", operation, args[i])
+			return 1
+		default:
+			positional = append(positional, args[i])
+		}
+	}
+
+	if len(positional) > 1 {
 		fmt.Fprintf(os.Stderr, "op %s: accepts at most one <holon-or-path>\n", operation)
 		return 1
 	}
 
 	target := "."
-	if len(args) == 1 {
-		target = args[0]
+	if len(positional) == 1 {
+		target = positional[0]
 	}
 
-	report, err := holons.ExecuteLifecycle(operation, target)
+	report, err := holons.ExecuteLifecycle(operation, target, opts)
 	if err != nil {
 		if format == FormatJSON {
 			type errorReport struct {
@@ -72,6 +93,15 @@ func formatLifecycleReport(format Format, report holons.Report) string {
 	if report.Binary != "" {
 		fmt.Fprintf(&b, "Binary: %s\n", report.Binary)
 	}
+	if report.BuildTarget != "" {
+		fmt.Fprintf(&b, "Target: %s\n", report.BuildTarget)
+	}
+	if report.BuildMode != "" {
+		fmt.Fprintf(&b, "Mode: %s\n", report.BuildMode)
+	}
+	if report.Artifact != "" {
+		fmt.Fprintf(&b, "Artifact: %s\n", report.Artifact)
+	}
 	if len(report.Commands) > 0 {
 		b.WriteString("Commands:\n")
 		for _, command := range report.Commands {
@@ -82,6 +112,12 @@ func formatLifecycleReport(format Format, report holons.Report) string {
 		b.WriteString("Notes:\n")
 		for _, note := range report.Notes {
 			fmt.Fprintf(&b, "- %s\n", note)
+		}
+	}
+	if len(report.Children) > 0 {
+		b.WriteString("Children:\n")
+		for _, child := range report.Children {
+			fmt.Fprintf(&b, "  %s (%s): %s\n", child.Holon, child.Runner, strings.Join(child.Notes, ", "))
 		}
 	}
 	return strings.TrimSpace(b.String())

@@ -55,6 +55,12 @@ op grpc+stdio://who ListIdentities '{}'
 
 v0.1.0 — promoted verbs, discover, namespace dispatch.
 
+## Design Drafts
+
+- [OP_BUILD_SPEC.md](OP_BUILD_SPEC.md) — proposed contract for
+  manifest-driven `op build`, including composite holons and `recipe`
+  orchestration.
+
 ## Organic Programming
 
 This holon is part of the [Organic Programming](https://github.com/organic-programming/seed)
