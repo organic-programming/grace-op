@@ -13,12 +13,8 @@ born: "2026-02-12"
 parents: ["b00932e5-49d4-4724-ab4b-e2fc9e22e108"]
 reproduction: "manual"
 
-# Optional
-aliases: ["op"]
-
 # Metadata
 generated_by: "sophia-who"
-lang: "go"
 proto_status: draft
 ---
 

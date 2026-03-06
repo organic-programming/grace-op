@@ -8,16 +8,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/organic-programming/go-holons/pkg/transport"
 	"github.com/organic-programming/grace-op/internal/grpcclient"
+	"github.com/organic-programming/grace-op/internal/holons"
 	"github.com/organic-programming/grace-op/internal/server"
-	"github.com/organic-programming/sophia-who/pkg/identity"
 )
 
 // Run dispatches the command and returns an exit code.
@@ -37,6 +35,14 @@ func Run(args []string, version string) int {
 
 	switch cmd {
 	// --- OP's own commands ---
+	case "check":
+		return cmdLifecycle(format, holons.OperationCheck, rest)
+	case "build":
+		return cmdLifecycle(format, holons.OperationBuild, rest)
+	case "test":
+		return cmdLifecycle(format, holons.OperationTest, rest)
+	case "clean":
+		return cmdLifecycle(format, holons.OperationClean, rest)
 	case "run":
 		return cmdRun(rest)
 	case "discover":
@@ -85,6 +91,10 @@ Direct gRPC URI dispatch:
   op run <holon> --listen <URI>          start with any transport
 
 OP commands:
+  op check [<holon-or-path>]             validate holon.yaml and prerequisites
+  op build [<holon-or-path>]             build a holon artifact via its runner
+  op test [<holon-or-path>]              run a holon's test contract
+  op clean [<holon-or-path>]             remove .op/ build outputs
   op discover                            list available holons
   op serve [--listen tcp://:9090]        start OP's own gRPC server
   op version                             show op version
@@ -111,62 +121,26 @@ type discoverOutput struct {
 }
 
 func cmdDiscover(format Format) int {
-	const scanRoot = "holons"
-
-	var (
-		holons  []identity.Identity
-		located []identity.LocatedIdentity
-	)
-	if _, err := os.Stat(scanRoot); err == nil {
-		var scanErr error
-		holons, scanErr = identity.FindAll(scanRoot)
-		if scanErr != nil {
-			fmt.Fprintf(os.Stderr, "op discover: %v\n", scanErr)
-			return 1
-		}
-		located, scanErr = identity.FindAllWithPaths(scanRoot)
-		if scanErr != nil {
-			fmt.Fprintf(os.Stderr, "op discover: %v\n", scanErr)
-			return 1
-		}
-	} else if !os.IsNotExist(err) {
+	located, err := holons.DiscoverLocalHolons()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "op discover: %v\n", err)
 		return 1
 	}
 
-	relativePathByUUID := make(map[string]string, len(located))
+	entries := make([]discoverEntry, 0, len(located))
 	for _, h := range located {
-		relDir := filepath.Dir(h.Path)
-		if rel, err := filepath.Rel(scanRoot, relDir); err == nil {
-			relDir = rel
-		}
-		relativePathByUUID[h.Identity.UUID] = filepath.ToSlash(relDir)
-	}
-
-	entries := make([]discoverEntry, 0, len(holons))
-	for _, h := range holons {
 		entries = append(entries, discoverEntry{
-			UUID:         h.UUID,
-			GivenName:    h.GivenName,
-			FamilyName:   h.FamilyName,
-			Lang:         h.Lang,
-			Clade:        h.Clade,
-			Status:       h.Status,
-			RelativePath: relativePathByUUID[h.UUID],
+			UUID:         h.Identity.UUID,
+			GivenName:    h.Identity.GivenName,
+			FamilyName:   h.Identity.FamilyName,
+			Lang:         h.Identity.Lang,
+			Clade:        h.Identity.Clade,
+			Status:       h.Identity.Status,
+			RelativePath: h.RelativePath,
 			Origin:       "local",
 		})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		leftName := strings.ToLower(strings.TrimSpace(entries[i].GivenName + " " + entries[i].FamilyName))
-		rightName := strings.ToLower(strings.TrimSpace(entries[j].GivenName + " " + entries[j].FamilyName))
-		if leftName == rightName {
-			return entries[i].UUID < entries[j].UUID
-		}
-		return leftName < rightName
-	})
-
 	pathHolons := discoverInPath()
-	sort.Strings(pathHolons)
 
 	if format == FormatJSON {
 		payload := discoverOutput{
@@ -188,7 +162,7 @@ func cmdDiscover(format Format) int {
 
 func printDiscoverTable(entries []discoverEntry, pathHolons []string) {
 	if len(entries) == 0 {
-		fmt.Println("No local holons found in holons/.")
+		fmt.Println("No local holons found in known roots.")
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tLANG\tCLADE\tSTATUS\tORIGIN\tREL_PATH\tUUID")
@@ -488,14 +462,7 @@ func cmdGRPCDirect(format Format, address string, args []string) int {
 }
 
 func discoverInPath() []string {
-	known := []string{"who", "atlas", "translate", "op"}
-	var found []string
-	for _, name := range known {
-		if p, err := exec.LookPath(name); err == nil {
-			found = append(found, fmt.Sprintf("%-12s → %s", name, p))
-		}
-	}
-	return found
+	return holons.DiscoverInPath()
 }
 
 // --- Namespace dispatch ---
@@ -627,38 +594,7 @@ func cmdDispatch(holon string, args []string) int {
 // 1. holons/<name>/<name> (sibling submodule binary)
 // 2. $PATH
 func resolveHolon(name string) (string, error) {
-	// Alias mapping: "who" → "sophia-who", etc.
-	aliases := map[string]string{
-		"who":       "who",
-		"atlas":     "atlas",
-		"translate": "translate",
-	}
-
-	binName := name
-	if mapped, ok := aliases[name]; ok {
-		binName = mapped
-	}
-
-	// Try sibling holon directories
-	candidates := []string{
-		filepath.Join("holons", name, binName),
-		filepath.Join("holons", "sophia-"+name, binName),
-		filepath.Join("holons", "rhizome-"+name, binName),
-		filepath.Join("holons", "babel-fish-"+name, binName),
-	}
-
-	for _, path := range candidates {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
-		}
-	}
-
-	// Try $PATH
-	if p, err := exec.LookPath(binName); err == nil {
-		return p, nil
-	}
-
-	return "", fmt.Errorf("holon %q not found", name)
+	return holons.ResolveBinary(name)
 }
 
 // --- Flag helpers ---

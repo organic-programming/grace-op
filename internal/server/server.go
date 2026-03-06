@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/organic-programming/go-holons/pkg/transport"
+	"github.com/organic-programming/grace-op/internal/holons"
 	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
 	"github.com/organic-programming/sophia-who/pkg/identity"
 
@@ -35,20 +36,20 @@ func (s *Server) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.Dis
 		root = "."
 	}
 
-	holons, err := identity.FindAll(root)
+	localHolons, err := identity.FindAll(root)
 	if err != nil {
 		return nil, err
 	}
 
-	entries := make([]*pb.HolonEntry, 0, len(holons))
-	for _, h := range holons {
+	entries := make([]*pb.HolonEntry, 0, len(localHolons))
+	for _, h := range localHolons {
 		entries = append(entries, &pb.HolonEntry{
 			Identity: toProto(h),
 			Origin:   "local",
 		})
 	}
 
-	pathBinaries := discoverInPath()
+	pathBinaries := holons.DiscoverInPath()
 
 	return &pb.DiscoverResponse{
 		Entries:      entries,
@@ -58,7 +59,7 @@ func (s *Server) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.Dis
 
 // Invoke dispatches a command to a holon by name.
 func (s *Server) Invoke(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeResponse, error) {
-	binary, err := resolveHolon(req.Holon)
+	binary, err := holons.ResolveBinary(req.Holon)
 	if err != nil {
 		return &pb.InvokeResponse{
 			ExitCode: 1,
@@ -311,49 +312,4 @@ func reproductionFromProto(value sophiapb.ReproductionMode) string {
 	default:
 		return ""
 	}
-}
-
-// discoverInPath looks for known holon binaries in $PATH.
-func discoverInPath() []string {
-	known := []string{"who", "atlas", "translate", "op"}
-	var found []string
-	for _, name := range known {
-		if p, err := exec.LookPath(name); err == nil {
-			found = append(found, fmt.Sprintf("%s → %s", name, p))
-		}
-	}
-	return found
-}
-
-// resolveHolon finds a holon binary by name.
-func resolveHolon(name string) (string, error) {
-	aliases := map[string]string{
-		"who":       "who",
-		"atlas":     "atlas",
-		"translate": "translate",
-	}
-
-	binName := name
-	if mapped, ok := aliases[name]; ok {
-		binName = mapped
-	}
-
-	candidates := []string{
-		filepath.Join("holons", name, binName),
-		filepath.Join("holons", "sophia-"+name, binName),
-		filepath.Join("holons", "rhizome-"+name, binName),
-		filepath.Join("holons", "babel-fish-"+name, binName),
-	}
-
-	for _, path := range candidates {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
-		}
-	}
-
-	if p, err := exec.LookPath(binName); err == nil {
-		return p, nil
-	}
-
-	return "", fmt.Errorf("holon %q not found", name)
 }
