@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -119,8 +118,9 @@ type Delegates struct {
 }
 
 type ArtifactPaths struct {
-	Binary  string `yaml:"binary"`
-	Primary string `yaml:"primary,omitempty"`
+	Binary          string                       `yaml:"binary"`
+	Primary         string                       `yaml:"primary,omitempty"`
+	PrimaryByTarget map[string]map[string]string `yaml:"primary_by_target,omitempty"`
 }
 
 type LoadedManifest struct {
@@ -156,6 +156,9 @@ func LoadManifest(dir string) (*LoadedManifest, error) {
 		Name:     filepath.Base(absDir),
 	}
 
+	if err := normalizeManifest(loaded); err != nil {
+		return nil, err
+	}
 	if err := validateManifest(loaded); err != nil {
 		return nil, err
 	}
@@ -164,21 +167,47 @@ func LoadManifest(dir string) (*LoadedManifest, error) {
 }
 
 func (m *LoadedManifest) SupportsCurrentPlatform() bool {
+	return m.SupportsTarget(canonicalRuntimeTarget())
+}
+
+func (m *LoadedManifest) SupportsTarget(target string) bool {
 	if m == nil || len(m.Manifest.Platforms) == 0 {
 		return true
 	}
-	return slices.Contains(m.Manifest.Platforms, runtime.GOOS)
+	return slices.ContainsFunc(m.Manifest.Platforms, func(platform string) bool {
+		return normalizePlatformName(platform) == normalizePlatformName(target)
+	})
+}
+
+func (m *LoadedManifest) ResolveManifestPath(rel string) (string, error) {
+	return resolveManifestPath(m.Dir, rel)
+}
+
+func (m *LoadedManifest) mustResolveManifestPath(rel string) string {
+	resolved, err := m.ResolveManifestPath(rel)
+	if err == nil {
+		return resolved
+	}
+	return filepath.Join(m.Dir, filepath.FromSlash(rel))
 }
 
 func (m *LoadedManifest) BinaryPath() string {
-	return filepath.Join(m.Dir, filepath.FromSlash(m.Manifest.Artifacts.Binary))
+	if strings.TrimSpace(m.Manifest.Artifacts.Binary) == "" {
+		return ""
+	}
+	return m.mustResolveManifestPath(m.Manifest.Artifacts.Binary)
 }
 
 // PrimaryArtifactPath returns the primary artifact path (success contract).
-// If artifacts.primary is set, it takes precedence over artifacts.binary.
-func (m *LoadedManifest) PrimaryArtifactPath() string {
-	if p := m.Manifest.Artifacts.Primary; strings.TrimSpace(p) != "" {
-		return filepath.Join(m.Dir, filepath.FromSlash(p))
+// Target-aware artifacts take precedence over artifacts.primary, then artifacts.binary.
+func (m *LoadedManifest) PrimaryArtifactPath(ctx BuildContext) string {
+	if byTarget, ok := m.Manifest.Artifacts.PrimaryByTarget[ctx.Target]; ok {
+		if p := strings.TrimSpace(byTarget[ctx.Mode]); p != "" {
+			return m.mustResolveManifestPath(p)
+		}
+	}
+	if p := strings.TrimSpace(m.Manifest.Artifacts.Primary); p != "" {
+		return m.mustResolveManifestPath(p)
 	}
 	return m.BinaryPath()
 }
@@ -215,17 +244,35 @@ func validateManifest(m *LoadedManifest) error {
 		return fmt.Errorf("%s: build.runner must be %q, %q, or %q", m.Path, RunnerGoModule, RunnerCMake, RunnerRecipe)
 	}
 
-	// Artifact validation: binary required for leaf runners, primary or binary for recipe.
+	// Artifact validation: binary required for leaf runners, primary/primary_by_target/binary for recipe.
 	hasBinary := strings.TrimSpace(m.Manifest.Artifacts.Binary) != ""
 	hasPrimary := strings.TrimSpace(m.Manifest.Artifacts.Primary) != ""
-	if !hasBinary && !hasPrimary {
-		return fmt.Errorf("%s: artifacts.binary or artifacts.primary is required", m.Path)
+	hasPrimaryByTarget := len(m.Manifest.Artifacts.PrimaryByTarget) > 0
+	if !hasBinary && !hasPrimary && !hasPrimaryByTarget {
+		return fmt.Errorf("%s: artifacts.binary, artifacts.primary, or artifacts.primary_by_target is required", m.Path)
 	}
-	if hasBinary && filepath.IsAbs(m.Manifest.Artifacts.Binary) {
-		return fmt.Errorf("%s: artifacts.binary must be relative to the manifest directory", m.Path)
+	if hasBinary {
+		if err := validateManifestRelativeField(m, "artifacts.binary", m.Manifest.Artifacts.Binary); err != nil {
+			return err
+		}
 	}
-	if hasPrimary && filepath.IsAbs(m.Manifest.Artifacts.Primary) {
-		return fmt.Errorf("%s: artifacts.primary must be relative to the manifest directory", m.Path)
+	if hasPrimary {
+		if err := validateManifestRelativeField(m, "artifacts.primary", m.Manifest.Artifacts.Primary); err != nil {
+			return err
+		}
+	}
+	for target, byMode := range m.Manifest.Artifacts.PrimaryByTarget {
+		if len(byMode) == 0 {
+			return fmt.Errorf("%s: artifacts.primary_by_target[%q] must declare at least one mode", m.Path, target)
+		}
+		for mode, relPath := range byMode {
+			if !isValidBuildMode(mode) {
+				return fmt.Errorf("%s: artifacts.primary_by_target[%q] mode %q must be one of debug, release, profile", m.Path, target, mode)
+			}
+			if err := validateManifestRelativeField(m, fmt.Sprintf("artifacts.primary_by_target[%q][%q]", target, mode), relPath); err != nil {
+				return err
+			}
+		}
 	}
 
 	if m.Manifest.Build.Runner != RunnerGoModule && strings.TrimSpace(m.Manifest.Build.Main) != "" {
@@ -255,6 +302,11 @@ func validateManifest(m *LoadedManifest) error {
 	if err := validateList("requires.files", m.Manifest.Requires.Files); err != nil {
 		return fmt.Errorf("%s: %w", m.Path, err)
 	}
+	for _, requiredFile := range m.Manifest.Requires.Files {
+		if err := validateManifestRelativeField(m, "requires.files", requiredFile); err != nil {
+			return err
+		}
+	}
 	if err := validateList("delegates.commands", m.Manifest.Delegates.Commands); err != nil {
 		return fmt.Errorf("%s: %w", m.Path, err)
 	}
@@ -272,6 +324,7 @@ func validateRecipe(m *LoadedManifest) error {
 	}
 
 	memberIDs := make(map[string]bool, len(m.Manifest.Build.Members))
+	memberTypes := make(map[string]string, len(m.Manifest.Build.Members))
 	for _, member := range m.Manifest.Build.Members {
 		if strings.TrimSpace(member.ID) == "" {
 			return fmt.Errorf("%s: recipe member must have an id", m.Path)
@@ -284,18 +337,59 @@ func validateRecipe(m *LoadedManifest) error {
 		if strings.TrimSpace(member.Path) == "" {
 			return fmt.Errorf("%s: recipe member %q must have a path", m.Path, member.ID)
 		}
+		if err := validateManifestRelativeField(m, fmt.Sprintf("build.members[%q].path", member.ID), member.Path); err != nil {
+			return err
+		}
 		switch member.Type {
 		case "holon", "component":
 		default:
 			return fmt.Errorf("%s: recipe member %q type must be \"holon\" or \"component\"", m.Path, member.ID)
 		}
+		memberTypes[member.ID] = member.Type
 	}
 
-	// Validate that build_member references exist in members.
+	if defaults := m.Manifest.Build.Defaults; defaults != nil && defaults.Target != "" {
+		if _, ok := m.Manifest.Build.Targets[defaults.Target]; !ok {
+			return fmt.Errorf("%s: recipe default target %q is not defined in build.targets", m.Path, defaults.Target)
+		}
+	}
+
 	for targetName, target := range m.Manifest.Build.Targets {
+		if len(target.Steps) == 0 {
+			return fmt.Errorf("%s: target %q must declare at least one step", m.Path, targetName)
+		}
 		for i, step := range target.Steps {
-			if step.BuildMember != "" && !memberIDs[step.BuildMember] {
-				return fmt.Errorf("%s: target %q step %d references unknown member %q", m.Path, targetName, i+1, step.BuildMember)
+			if step.actionCount() != 1 {
+				return fmt.Errorf("%s: target %q step %d must declare exactly one action", m.Path, targetName, i+1)
+			}
+			if step.BuildMember != "" {
+				if !memberIDs[step.BuildMember] {
+					return fmt.Errorf("%s: target %q step %d references unknown member %q", m.Path, targetName, i+1, step.BuildMember)
+				}
+				if memberTypes[step.BuildMember] != "holon" {
+					return fmt.Errorf("%s: target %q step %d build_member %q must reference a holon member", m.Path, targetName, i+1, step.BuildMember)
+				}
+			}
+			if step.Exec != nil {
+				if len(step.Exec.Argv) == 0 {
+					return fmt.Errorf("%s: target %q step %d exec.argv must not be empty", m.Path, targetName, i+1)
+				}
+				if err := validateManifestRelativeField(m, fmt.Sprintf("build.targets[%q].steps[%d].exec.cwd", targetName, i+1), step.Exec.Cwd); err != nil {
+					return err
+				}
+			}
+			if step.Copy != nil {
+				if err := validateManifestRelativeField(m, fmt.Sprintf("build.targets[%q].steps[%d].copy.from", targetName, i+1), step.Copy.From); err != nil {
+					return err
+				}
+				if err := validateManifestRelativeField(m, fmt.Sprintf("build.targets[%q].steps[%d].copy.to", targetName, i+1), step.Copy.To); err != nil {
+					return err
+				}
+			}
+			if step.AssertFile != nil {
+				if err := validateManifestRelativeField(m, fmt.Sprintf("build.targets[%q].steps[%d].assert_file.path", targetName, i+1), step.AssertFile.Path); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -318,9 +412,118 @@ func validateList(field string, values []string) error {
 	return nil
 }
 
+func normalizeManifest(m *LoadedManifest) error {
+	normalizedPlatforms := make([]string, 0, len(m.Manifest.Platforms))
+	for _, platform := range m.Manifest.Platforms {
+		normalizedPlatforms = append(normalizedPlatforms, normalizePlatformName(platform))
+	}
+	m.Manifest.Platforms = normalizedPlatforms
+
+	if defaults := m.Manifest.Build.Defaults; defaults != nil && defaults.Target != "" {
+		target, err := normalizeBuildTarget(defaults.Target)
+		if err != nil {
+			return fmt.Errorf("%s: build.defaults.target: %w", m.Path, err)
+		}
+		defaults.Target = target
+	}
+	if defaults := m.Manifest.Build.Defaults; defaults != nil && defaults.Mode != "" {
+		defaults.Mode = normalizeBuildMode(defaults.Mode)
+		if !isValidBuildMode(defaults.Mode) {
+			return fmt.Errorf("%s: build.defaults.mode %q must be one of debug, release, profile", m.Path, defaults.Mode)
+		}
+	}
+
+	if len(m.Manifest.Build.Targets) > 0 {
+		normalizedTargets := make(map[string]RecipeTarget, len(m.Manifest.Build.Targets))
+		for target, recipeTarget := range m.Manifest.Build.Targets {
+			normalizedTarget, err := normalizeBuildTarget(target)
+			if err != nil {
+				return fmt.Errorf("%s: build.targets[%q]: %w", m.Path, target, err)
+			}
+			if _, exists := normalizedTargets[normalizedTarget]; exists {
+				return fmt.Errorf("%s: duplicate recipe target after normalization: %q", m.Path, normalizedTarget)
+			}
+			normalizedTargets[normalizedTarget] = recipeTarget
+		}
+		m.Manifest.Build.Targets = normalizedTargets
+	}
+
+	if len(m.Manifest.Artifacts.PrimaryByTarget) > 0 {
+		normalizedArtifacts := make(map[string]map[string]string, len(m.Manifest.Artifacts.PrimaryByTarget))
+		for target, byMode := range m.Manifest.Artifacts.PrimaryByTarget {
+			normalizedTarget, err := normalizeBuildTarget(target)
+			if err != nil {
+				return fmt.Errorf("%s: artifacts.primary_by_target[%q]: %w", m.Path, target, err)
+			}
+			if _, exists := normalizedArtifacts[normalizedTarget]; exists {
+				return fmt.Errorf("%s: duplicate artifacts.primary_by_target entry after normalization: %q", m.Path, normalizedTarget)
+			}
+			normalizedModes := make(map[string]string, len(byMode))
+			for mode, relPath := range byMode {
+				normalizedMode := normalizeBuildMode(mode)
+				if !isValidBuildMode(normalizedMode) {
+					return fmt.Errorf("%s: artifacts.primary_by_target[%q] mode %q must be one of debug, release, profile", m.Path, target, mode)
+				}
+				if _, exists := normalizedModes[normalizedMode]; exists {
+					return fmt.Errorf("%s: duplicate artifacts.primary_by_target[%q] mode %q", m.Path, normalizedTarget, normalizedMode)
+				}
+				normalizedModes[normalizedMode] = relPath
+			}
+			normalizedArtifacts[normalizedTarget] = normalizedModes
+		}
+		m.Manifest.Artifacts.PrimaryByTarget = normalizedArtifacts
+	}
+
+	return nil
+}
+
+func validateManifestRelativeField(m *LoadedManifest, field, relPath string) error {
+	if _, err := m.ResolveManifestPath(relPath); err != nil {
+		return fmt.Errorf("%s: %s: %w", m.Path, field, err)
+	}
+	return nil
+}
+
+func resolveManifestPath(baseDir, rel string) (string, error) {
+	trimmed := strings.TrimSpace(rel)
+	if trimmed == "" {
+		return "", fmt.Errorf("path must not be empty")
+	}
+	if filepath.IsAbs(trimmed) {
+		return "", fmt.Errorf("path must be relative to the manifest directory")
+	}
+	cleaned := filepath.Clean(filepath.FromSlash(trimmed))
+	fullPath := filepath.Join(baseDir, cleaned)
+	relToBase, err := filepath.Rel(baseDir, fullPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	if relToBase == ".." || strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path must stay within the manifest directory")
+	}
+	return fullPath, nil
+}
+
+func (s RecipeStep) actionCount() int {
+	count := 0
+	if strings.TrimSpace(s.BuildMember) != "" {
+		count++
+	}
+	if s.Exec != nil {
+		count++
+	}
+	if s.Copy != nil {
+		count++
+	}
+	if s.AssertFile != nil {
+		count++
+	}
+	return count
+}
+
 func isValidPlatform(platform string) bool {
-	switch platform {
-	case "aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios",
+	switch normalizePlatformName(platform) {
+	case "aix", "android", "macos", "dragonfly", "freebsd", "illumos", "ios",
 		"js", "linux", "netbsd", "openbsd", "plan9", "solaris", "wasip1",
 		"windows":
 		return true

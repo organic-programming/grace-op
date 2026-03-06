@@ -16,37 +16,24 @@ const (
 	OperationBuild Operation = "build"
 	OperationTest  Operation = "test"
 	OperationClean Operation = "clean"
+
+	buildModeDebug   = "debug"
+	buildModeRelease = "release"
+	buildModeProfile = "profile"
 )
 
-// BuildOptions controls target selection, build mode, and dry-run.
-// Zero value means: target=runtime GOOS, mode=debug, dry-run=false.
+// BuildOptions captures CLI/build request overrides before manifest defaults are applied.
 type BuildOptions struct {
-	Target string // macos, linux, windows, ios, android
-	Mode   string // debug, release, profile
+	Target string
+	Mode   string
 	DryRun bool
 }
 
-func (o BuildOptions) resolvedTarget() string {
-	if o.Target != "" {
-		return o.Target
-	}
-	return runtimePlatform()
-}
-
-func (o BuildOptions) resolvedMode() string {
-	if o.Mode != "" {
-		return o.Mode
-	}
-	return "debug"
-}
-
-var validTargets = map[string]bool{
-	"macos": true, "linux": true, "windows": true,
-	"ios": true, "android": true, "darwin": true,
-}
-
-var validModes = map[string]bool{
-	"debug": true, "release": true, "profile": true,
+// BuildContext is the canonical build request used by runners and artifact resolution.
+type BuildContext struct {
+	Target string
+	Mode   string
+	DryRun bool
 }
 
 type Report struct {
@@ -67,28 +54,17 @@ type Report struct {
 }
 
 type runner interface {
-	check(*LoadedManifest) error
-	build(*LoadedManifest, *Report) error
-	test(*LoadedManifest, *Report) error
+	check(*LoadedManifest, BuildContext) error
+	build(*LoadedManifest, BuildContext, *Report) error
+	test(*LoadedManifest, BuildContext, *Report) error
 	clean(*LoadedManifest, *Report) error
 }
 
 // ExecuteLifecycle runs a lifecycle operation on a holon.
-// opts is only meaningful for OperationBuild; zero value gives defaults.
 func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, error) {
 	var bo BuildOptions
 	if len(opts) > 0 {
 		bo = opts[0]
-	}
-
-	// Validate target and mode early.
-	if t := bo.resolvedTarget(); !validTargets[t] {
-		return Report{Operation: string(op), Target: normalizedTarget(ref)},
-			fmt.Errorf("unsupported target %q (supported: macos, linux, windows, ios, android)", t)
-	}
-	if m := bo.resolvedMode(); !validModes[m] {
-		return Report{Operation: string(op), Target: normalizedTarget(ref)},
-			fmt.Errorf("unsupported mode %q (supported: debug, release, profile)", m)
 	}
 
 	target, err := ResolveTarget(ref)
@@ -96,30 +72,33 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		return Report{Operation: string(op), Target: normalizedTarget(ref)}, err
 	}
 	if target.ManifestErr != nil {
-		return baseReport(op, target, bo), target.ManifestErr
+		return baseReport(op, target, BuildContext{}), target.ManifestErr
 	}
 	if target.Manifest == nil {
-		return baseReport(op, target, bo), fmt.Errorf("no %s found in %s", ManifestFileName, target.RelativePath)
+		return baseReport(op, target, BuildContext{}), fmt.Errorf("no %s found in %s", ManifestFileName, target.RelativePath)
 	}
 
-	report := baseReport(op, target, bo)
+	ctx, err := resolveBuildContext(target.Manifest, bo)
+	if err != nil {
+		return baseReport(op, target, BuildContext{}), err
+	}
+	if op != OperationBuild {
+		ctx.DryRun = false
+	}
+
+	report := baseReport(op, target, ctx)
 	r, err := runnerFor(target.Manifest)
 	if err != nil {
 		return report, err
 	}
 
 	if op != OperationClean {
-		if err := preflight(target.Manifest); err != nil {
+		if err := preflight(target.Manifest, ctx); err != nil {
 			return report, err
 		}
-		if err := r.check(target.Manifest); err != nil {
+		if err := r.check(target.Manifest, ctx); err != nil {
 			return report, err
 		}
-	}
-
-	if bo.DryRun {
-		report.Notes = append(report.Notes, "dry run — no commands executed")
-		return report, nil
 	}
 
 	switch op {
@@ -127,12 +106,18 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		report.Notes = append(report.Notes, "manifest and prerequisites validated")
 		return report, nil
 	case OperationBuild:
-		err = r.build(target.Manifest, &report)
+		err = r.build(target.Manifest, ctx, &report)
 		if err == nil {
-			err = verifyArtifact(target.Manifest, &report)
+			err = resolveArtifact(target.Manifest, ctx, &report)
+		}
+		if err == nil && !ctx.DryRun {
+			err = verifyArtifact(target.Manifest, ctx, &report)
+		}
+		if err == nil && ctx.DryRun {
+			report.Notes = append(report.Notes, "dry run — no commands executed")
 		}
 	case OperationTest:
-		err = r.test(target.Manifest, &report)
+		err = r.test(target.Manifest, ctx, &report)
 	case OperationClean:
 		err = r.clean(target.Manifest, &report)
 	default:
@@ -142,11 +127,20 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 	return report, err
 }
 
-// verifyArtifact checks the primary artifact exists after build (success contract).
-func verifyArtifact(manifest *LoadedManifest, report *Report) error {
-	artifactPath := manifest.PrimaryArtifactPath()
+func resolveArtifact(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	artifactPath := manifest.PrimaryArtifactPath(ctx)
 	if artifactPath == "" {
-		return nil // no artifact declared
+		return fmt.Errorf("no artifact declared for target %q mode %q", ctx.Target, ctx.Mode)
+	}
+	report.Artifact = workspaceRelativePath(artifactPath)
+	return nil
+}
+
+// verifyArtifact checks the primary artifact exists after build (success contract).
+func verifyArtifact(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	artifactPath := manifest.PrimaryArtifactPath(ctx)
+	if artifactPath == "" {
+		return fmt.Errorf("no artifact declared for target %q mode %q", ctx.Target, ctx.Mode)
 	}
 	if _, err := os.Stat(artifactPath); err != nil {
 		return fmt.Errorf("primary artifact missing after build: %s", workspaceRelativePath(artifactPath))
@@ -156,7 +150,7 @@ func verifyArtifact(manifest *LoadedManifest, report *Report) error {
 	return nil
 }
 
-func baseReport(op Operation, target *Target, bo BuildOptions) Report {
+func baseReport(op Operation, target *Target, ctx BuildContext) Report {
 	holonName := filepath.Base(target.Dir)
 	if ref := strings.TrimSpace(target.Ref); ref != "" && ref != "." && !strings.ContainsAny(ref, `/\`) {
 		holonName = ref
@@ -167,25 +161,35 @@ func baseReport(op Operation, target *Target, bo BuildOptions) Report {
 		Target:      normalizedTarget(target.Ref),
 		Holon:       holonName,
 		Dir:         target.RelativePath,
-		BuildTarget: bo.resolvedTarget(),
-		BuildMode:   bo.resolvedMode(),
+		BuildTarget: ctx.Target,
+		BuildMode:   ctx.Mode,
 	}
 	if target.Manifest != nil {
 		report.Manifest = workspaceRelativePath(target.Manifest.Path)
 		report.Runner = target.Manifest.Manifest.Build.Runner
 		report.Kind = target.Manifest.Manifest.Kind
-		report.Binary = workspaceRelativePath(target.Manifest.BinaryPath())
+		if binaryPath := target.Manifest.BinaryPath(); binaryPath != "" {
+			report.Binary = workspaceRelativePath(binaryPath)
+		}
+		if op == OperationBuild {
+			if artifactPath := target.Manifest.PrimaryArtifactPath(ctx); artifactPath != "" {
+				report.Artifact = workspaceRelativePath(artifactPath)
+			}
+		}
 	}
 	return report
 }
 
-func preflight(manifest *LoadedManifest) error {
-	if !manifest.SupportsCurrentPlatform() {
-		return fmt.Errorf("platform %q is not supported by %s", runtimePlatform(), workspaceRelativePath(manifest.Path))
+func preflight(manifest *LoadedManifest, ctx BuildContext) error {
+	if !manifest.SupportsTarget(ctx.Target) {
+		return fmt.Errorf("target %q is not supported by %s", ctx.Target, workspaceRelativePath(manifest.Path))
 	}
 
 	for _, requiredFile := range manifest.Manifest.Requires.Files {
-		fullPath := filepath.Join(manifest.Dir, filepath.FromSlash(requiredFile))
+		fullPath, err := manifest.ResolveManifestPath(requiredFile)
+		if err != nil {
+			return fmt.Errorf("invalid required file %q: %w", requiredFile, err)
+		}
 		if _, err := os.Stat(fullPath); err != nil {
 			return fmt.Errorf("missing required file %q (%s)", requiredFile, workspaceRelativePath(fullPath))
 		}
@@ -208,6 +212,45 @@ func requiredCommands(manifest *LoadedManifest) []string {
 	return uniqueNonEmpty(commands)
 }
 
+func resolveBuildContext(manifest *LoadedManifest, opts BuildOptions) (BuildContext, error) {
+	target := strings.TrimSpace(opts.Target)
+	if target != "" {
+		if strings.EqualFold(target, "darwin") {
+			return BuildContext{}, fmt.Errorf("unsupported target %q (supported: macos, linux, windows, ios, android)", target)
+		}
+		normalizedTarget, err := normalizeBuildTarget(target)
+		if err != nil {
+			return BuildContext{}, err
+		}
+		target = normalizedTarget
+	} else if defaults := manifest.Manifest.Build.Defaults; defaults != nil && strings.TrimSpace(defaults.Target) != "" {
+		target = defaults.Target
+	} else {
+		target = canonicalRuntimeTarget()
+	}
+
+	mode := strings.TrimSpace(opts.Mode)
+	if mode != "" {
+		mode = normalizeBuildMode(mode)
+		if !isValidBuildMode(mode) {
+			return BuildContext{}, fmt.Errorf("unsupported mode %q (supported: debug, release, profile)", opts.Mode)
+		}
+	} else if defaults := manifest.Manifest.Build.Defaults; defaults != nil && strings.TrimSpace(defaults.Mode) != "" {
+		mode = normalizeBuildMode(defaults.Mode)
+		if !isValidBuildMode(mode) {
+			return BuildContext{}, fmt.Errorf("unsupported mode %q (supported: debug, release, profile)", defaults.Mode)
+		}
+	} else {
+		mode = buildModeDebug
+	}
+
+	return BuildContext{
+		Target: target,
+		Mode:   mode,
+		DryRun: opts.DryRun,
+	}, nil
+}
+
 func runnerFor(manifest *LoadedManifest) (runner, error) {
 	switch manifest.Manifest.Build.Runner {
 	case RunnerGoModule:
@@ -223,10 +266,13 @@ func runnerFor(manifest *LoadedManifest) (runner, error) {
 
 type goModuleRunner struct{}
 
-func (goModuleRunner) check(manifest *LoadedManifest) error {
+func (goModuleRunner) check(manifest *LoadedManifest, _ BuildContext) error {
 	mainPackage := manifest.GoMainPackage()
 	if strings.HasPrefix(mainPackage, ".") {
-		fullPath := filepath.Join(manifest.Dir, filepath.FromSlash(mainPackage))
+		fullPath, err := manifest.ResolveManifestPath(mainPackage)
+		if err != nil {
+			return fmt.Errorf("go main package %q: %w", mainPackage, err)
+		}
 		info, err := os.Stat(fullPath)
 		if err != nil {
 			return fmt.Errorf("go main package %q not found (%s)", mainPackage, workspaceRelativePath(fullPath))
@@ -238,13 +284,20 @@ func (goModuleRunner) check(manifest *LoadedManifest) error {
 	return nil
 }
 
-func (goModuleRunner) build(manifest *LoadedManifest, report *Report) error {
-	if err := os.MkdirAll(filepath.Dir(manifest.BinaryPath()), 0755); err != nil {
+func (goModuleRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	if err := ensureHostBuildTarget(RunnerGoModule, ctx); err != nil {
 		return err
 	}
 
-	args := []string{"go", "build", "-o", manifest.BinaryPath(), manifest.GoMainPackage()}
+	binaryPath := manifest.BinaryPath()
+	args := []string{"go", "build", "-o", binaryPath, manifest.GoMainPackage()}
 	report.Commands = append(report.Commands, commandString(args))
+	if ctx.DryRun {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0755); err != nil {
+		return err
+	}
 	if output, err := runCommand(manifest.Dir, args); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
 	}
@@ -253,7 +306,10 @@ func (goModuleRunner) build(manifest *LoadedManifest, report *Report) error {
 	return nil
 }
 
-func (goModuleRunner) test(manifest *LoadedManifest, report *Report) error {
+func (goModuleRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	if err := ensureHostBuildTarget(RunnerGoModule, ctx); err != nil {
+		return err
+	}
 	args := []string{"go", "test", "./..."}
 	report.Commands = append(report.Commands, commandString(args))
 	if output, err := runCommand(manifest.Dir, args); err != nil {
@@ -274,31 +330,39 @@ func (goModuleRunner) clean(manifest *LoadedManifest, report *Report) error {
 
 type cmakeRunner struct{}
 
-func (cmakeRunner) check(manifest *LoadedManifest) error {
+func (cmakeRunner) check(manifest *LoadedManifest, _ BuildContext) error {
 	return nil
 }
 
-func (r cmakeRunner) build(manifest *LoadedManifest, report *Report) error {
-	if err := os.MkdirAll(manifest.CMakeBuildDir(), 0755); err != nil {
+func (r cmakeRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	if err := ensureHostBuildTarget(RunnerCMake, ctx); err != nil {
 		return err
 	}
 
+	config := cmakeBuildConfig(ctx.Mode)
 	binDir := filepath.Join(manifest.Dir, ".op", "build", "bin")
 	configureArgs := []string{
 		"cmake",
 		"-S", ".",
 		"-B", manifest.CMakeBuildDir(),
+		"-DCMAKE_BUILD_TYPE=" + config,
 		"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=" + binDir,
 		"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG=" + binDir,
 		"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE=" + binDir,
+		"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO=" + binDir,
 	}
 	report.Commands = append(report.Commands, commandString(configureArgs))
+	buildArgs := []string{"cmake", "--build", manifest.CMakeBuildDir(), "--config", config}
+	report.Commands = append(report.Commands, commandString(buildArgs))
+	if ctx.DryRun {
+		return nil
+	}
+	if err := os.MkdirAll(manifest.CMakeBuildDir(), 0755); err != nil {
+		return err
+	}
 	if output, err := runCommand(manifest.Dir, configureArgs); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
 	}
-
-	buildArgs := []string{"cmake", "--build", manifest.CMakeBuildDir()}
-	report.Commands = append(report.Commands, commandString(buildArgs))
 	if output, err := runCommand(manifest.Dir, buildArgs); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
 	}
@@ -307,12 +371,13 @@ func (r cmakeRunner) build(manifest *LoadedManifest, report *Report) error {
 	return nil
 }
 
-func (r cmakeRunner) test(manifest *LoadedManifest, report *Report) error {
-	if err := r.build(manifest, report); err != nil {
+func (r cmakeRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	if err := r.build(manifest, ctx, report); err != nil {
 		return err
 	}
 
-	listArgs := []string{"ctest", "--test-dir", manifest.CMakeBuildDir(), "-N"}
+	config := cmakeBuildConfig(ctx.Mode)
+	listArgs := []string{"ctest", "--test-dir", manifest.CMakeBuildDir(), "-N", "-C", config}
 	report.Commands = append(report.Commands, commandString(listArgs))
 	listOutput, err := runCommand(manifest.Dir, listArgs)
 	if err != nil {
@@ -322,7 +387,7 @@ func (r cmakeRunner) test(manifest *LoadedManifest, report *Report) error {
 		return fmt.Errorf("no tests configured for cmake runner; register tests with enable_testing() and add_test()")
 	}
 
-	testArgs := []string{"ctest", "--test-dir", manifest.CMakeBuildDir(), "--output-on-failure"}
+	testArgs := []string{"ctest", "--test-dir", manifest.CMakeBuildDir(), "--output-on-failure", "-C", config}
 	report.Commands = append(report.Commands, commandString(testArgs))
 	if output, err := runCommand(manifest.Dir, testArgs); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
@@ -344,10 +409,16 @@ func (cmakeRunner) clean(manifest *LoadedManifest, report *Report) error {
 
 type recipeRunner struct{}
 
-func (recipeRunner) check(manifest *LoadedManifest) error {
+func (recipeRunner) check(manifest *LoadedManifest, ctx BuildContext) error {
+	if _, ok := manifest.Manifest.Build.Targets[ctx.Target]; !ok {
+		return fmt.Errorf("no recipe target %q", ctx.Target)
+	}
 	// Verify all member paths exist on disk.
 	for _, member := range manifest.Manifest.Build.Members {
-		memberDir := filepath.Join(manifest.Dir, filepath.FromSlash(member.Path))
+		memberDir, err := manifest.ResolveManifestPath(member.Path)
+		if err != nil {
+			return fmt.Errorf("recipe member %q path: %w", member.ID, err)
+		}
 		if _, err := os.Stat(memberDir); err != nil {
 			return fmt.Errorf("recipe member %q path not found: %s", member.ID, memberDir)
 		}
@@ -362,23 +433,14 @@ func (recipeRunner) check(manifest *LoadedManifest) error {
 	return nil
 }
 
-func (r recipeRunner) build(manifest *LoadedManifest, report *Report) error {
-	// Resolve the target from recipe defaults.
-	buildTarget := r.resolveTarget(manifest)
-
-	target, ok := manifest.Manifest.Build.Targets[buildTarget]
+func (r recipeRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	target, ok := manifest.Manifest.Build.Targets[ctx.Target]
 	if !ok {
-		// Try "darwin" as an alias for "macos" on macOS.
-		if buildTarget == "darwin" {
-			target, ok = manifest.Manifest.Build.Targets["macos"]
+		available := make([]string, 0, len(manifest.Manifest.Build.Targets))
+		for name := range manifest.Manifest.Build.Targets {
+			available = append(available, name)
 		}
-		if !ok {
-			available := make([]string, 0, len(manifest.Manifest.Build.Targets))
-			for name := range manifest.Manifest.Build.Targets {
-				available = append(available, name)
-			}
-			return fmt.Errorf("no recipe target %q (available: %s)", buildTarget, strings.Join(available, ", "))
-		}
+		return fmt.Errorf("no recipe target %q (available: %s)", ctx.Target, strings.Join(available, ", "))
 	}
 
 	memberMap := make(map[string]RecipeMember, len(manifest.Manifest.Build.Members))
@@ -388,32 +450,34 @@ func (r recipeRunner) build(manifest *LoadedManifest, report *Report) error {
 
 	for i, step := range target.Steps {
 		stepLabel := fmt.Sprintf("step %d", i+1)
-		if err := r.executeStep(manifest, step, memberMap, report, stepLabel); err != nil {
-			return fmt.Errorf("target %q %s: %w", buildTarget, stepLabel, err)
+		if err := r.executeStep(manifest, ctx, step, memberMap, report, stepLabel); err != nil {
+			return fmt.Errorf("target %q %s: %w", ctx.Target, stepLabel, err)
 		}
 	}
 
-	report.Notes = append(report.Notes, fmt.Sprintf("recipe target %q completed (%d steps)", buildTarget, len(target.Steps)))
+	if !ctx.DryRun {
+		report.Notes = append(report.Notes, fmt.Sprintf("recipe target %q completed (%d steps)", ctx.Target, len(target.Steps)))
+	}
 	return nil
 }
 
-func (r recipeRunner) executeStep(manifest *LoadedManifest, step RecipeStep, members map[string]RecipeMember, report *Report, label string) error {
+func (r recipeRunner) executeStep(manifest *LoadedManifest, ctx BuildContext, step RecipeStep, members map[string]RecipeMember, report *Report, label string) error {
 	switch {
 	case step.BuildMember != "":
-		return r.stepBuildMember(manifest, step.BuildMember, members, report)
+		return r.stepBuildMember(manifest, ctx, step.BuildMember, members, report)
 	case step.Exec != nil:
-		return r.stepExec(manifest, step.Exec, report)
+		return r.stepExec(manifest, ctx, step.Exec, report)
 	case step.Copy != nil:
-		return r.stepCopy(manifest, step.Copy, report)
+		return r.stepCopy(manifest, ctx, step.Copy, report)
 	case step.AssertFile != nil:
-		return r.stepAssertFile(manifest, step.AssertFile, report)
+		return r.stepAssertFile(manifest, ctx, step.AssertFile, report)
 	default:
 		return fmt.Errorf("%s: empty step (no action defined)", label)
 	}
 }
 
 // stepBuildMember recursively builds a child holon.
-func (recipeRunner) stepBuildMember(manifest *LoadedManifest, memberID string, members map[string]RecipeMember, report *Report) error {
+func (recipeRunner) stepBuildMember(manifest *LoadedManifest, ctx BuildContext, memberID string, members map[string]RecipeMember, report *Report) error {
 	member, ok := members[memberID]
 	if !ok {
 		return fmt.Errorf("unknown member %q", memberID)
@@ -422,29 +486,41 @@ func (recipeRunner) stepBuildMember(manifest *LoadedManifest, memberID string, m
 		return fmt.Errorf("build_member can only target holon members, %q is %q", memberID, member.Type)
 	}
 
-	memberDir := filepath.Join(manifest.Dir, filepath.FromSlash(member.Path))
-	childReport, err := ExecuteLifecycle(OperationBuild, memberDir)
+	memberDir, err := manifest.ResolveManifestPath(member.Path)
+	if err != nil {
+		return fmt.Errorf("build_member %q path: %w", memberID, err)
+	}
+	report.Commands = append(report.Commands, "build_member "+memberID)
+	childReport, err := ExecuteLifecycle(OperationBuild, memberDir, BuildOptions{
+		Target: ctx.Target,
+		Mode:   ctx.Mode,
+		DryRun: ctx.DryRun,
+	})
 	report.Children = append(report.Children, childReport)
 	if err != nil {
 		return fmt.Errorf("build_member %q: %w", memberID, err)
 	}
 
-	report.Notes = append(report.Notes, fmt.Sprintf("built member %q", memberID))
+	if !ctx.DryRun {
+		report.Notes = append(report.Notes, fmt.Sprintf("built member %q", memberID))
+	}
 	return nil
 }
 
 // stepExec runs an argv command in an explicit working directory.
-func (recipeRunner) stepExec(manifest *LoadedManifest, e *RecipeStepExec, report *Report) error {
+func (recipeRunner) stepExec(manifest *LoadedManifest, ctx BuildContext, e *RecipeStepExec, report *Report) error {
 	if len(e.Argv) == 0 {
 		return fmt.Errorf("exec step has empty argv")
 	}
 
-	cwd := manifest.Dir
-	if e.Cwd != "" {
-		cwd = filepath.Join(manifest.Dir, filepath.FromSlash(e.Cwd))
+	cwd, err := manifest.ResolveManifestPath(e.Cwd)
+	if err != nil {
+		return fmt.Errorf("exec cwd %q: %w", e.Cwd, err)
 	}
-
-	report.Commands = append(report.Commands, fmt.Sprintf("(cwd=%s) %s", e.Cwd, commandString(e.Argv)))
+	report.Commands = append(report.Commands, fmt.Sprintf("(cwd=%s) %s", manifestRelativePath(manifest, cwd), commandString(e.Argv)))
+	if ctx.DryRun {
+		return nil
+	}
 	if output, err := runCommand(cwd, e.Argv); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
 	}
@@ -453,9 +529,19 @@ func (recipeRunner) stepExec(manifest *LoadedManifest, e *RecipeStepExec, report
 }
 
 // stepCopy copies a file from one manifest-relative path to another.
-func (recipeRunner) stepCopy(manifest *LoadedManifest, c *RecipeStepCopy, report *Report) error {
-	src := filepath.Join(manifest.Dir, filepath.FromSlash(c.From))
-	dst := filepath.Join(manifest.Dir, filepath.FromSlash(c.To))
+func (recipeRunner) stepCopy(manifest *LoadedManifest, ctx BuildContext, c *RecipeStepCopy, report *Report) error {
+	src, err := manifest.ResolveManifestPath(c.From)
+	if err != nil {
+		return fmt.Errorf("copy from %q: %w", c.From, err)
+	}
+	dst, err := manifest.ResolveManifestPath(c.To)
+	if err != nil {
+		return fmt.Errorf("copy to %q: %w", c.To, err)
+	}
+	report.Commands = append(report.Commands, fmt.Sprintf("copy %s -> %s", c.From, c.To))
+	if ctx.DryRun {
+		return nil
+	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return fmt.Errorf("copy: create dir for %s: %w", c.To, err)
@@ -479,8 +565,15 @@ func (recipeRunner) stepCopy(manifest *LoadedManifest, c *RecipeStepCopy, report
 }
 
 // stepAssertFile verifies a manifest-relative file exists.
-func (recipeRunner) stepAssertFile(manifest *LoadedManifest, a *RecipeStepFile, report *Report) error {
-	path := filepath.Join(manifest.Dir, filepath.FromSlash(a.Path))
+func (recipeRunner) stepAssertFile(manifest *LoadedManifest, ctx BuildContext, a *RecipeStepFile, report *Report) error {
+	path, err := manifest.ResolveManifestPath(a.Path)
+	if err != nil {
+		return fmt.Errorf("assert_file path %q: %w", a.Path, err)
+	}
+	report.Commands = append(report.Commands, "assert_file "+a.Path)
+	if ctx.DryRun {
+		return nil
+	}
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("assert_file: expected %s but not found", a.Path)
 	}
@@ -488,21 +581,20 @@ func (recipeRunner) stepAssertFile(manifest *LoadedManifest, a *RecipeStepFile, 
 	return nil
 }
 
-func (recipeRunner) resolveTarget(manifest *LoadedManifest) string {
-	if d := manifest.Manifest.Build.Defaults; d != nil && d.Target != "" {
-		return d.Target
-	}
-	return runtimePlatform()
-}
-
-func (recipeRunner) test(manifest *LoadedManifest, report *Report) error {
+func (recipeRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
 	// Run op test on each holon member.
 	for _, member := range manifest.Manifest.Build.Members {
 		if member.Type != "holon" {
 			continue
 		}
-		memberDir := filepath.Join(manifest.Dir, filepath.FromSlash(member.Path))
-		childReport, err := ExecuteLifecycle(OperationTest, memberDir)
+		memberDir, err := manifest.ResolveManifestPath(member.Path)
+		if err != nil {
+			return fmt.Errorf("test member %q path: %w", member.ID, err)
+		}
+		childReport, err := ExecuteLifecycle(OperationTest, memberDir, BuildOptions{
+			Target: ctx.Target,
+			Mode:   ctx.Mode,
+		})
 		report.Children = append(report.Children, childReport)
 		if err != nil {
 			return fmt.Errorf("test member %q: %w", member.ID, err)
@@ -548,6 +640,74 @@ func normalizedTarget(ref string) string {
 		return "."
 	}
 	return ref
+}
+
+func normalizeBuildTarget(target string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(target))
+	switch normalized {
+	case "darwin", "macos":
+		return "macos", nil
+	case "linux", "windows", "ios", "android":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported target %q (supported: macos, linux, windows, ios, android)", target)
+	}
+}
+
+func normalizePlatformName(platform string) string {
+	normalized, err := normalizeBuildTarget(platform)
+	if err == nil {
+		return normalized
+	}
+	return strings.ToLower(strings.TrimSpace(platform))
+}
+
+func normalizeBuildMode(mode string) string {
+	return strings.ToLower(strings.TrimSpace(mode))
+}
+
+func isValidBuildMode(mode string) bool {
+	switch normalizeBuildMode(mode) {
+	case buildModeDebug, buildModeRelease, buildModeProfile:
+		return true
+	default:
+		return false
+	}
+}
+
+func canonicalRuntimeTarget() string {
+	switch runtimePlatform() {
+	case "darwin":
+		return "macos"
+	default:
+		return runtimePlatform()
+	}
+}
+
+func ensureHostBuildTarget(runnerName string, ctx BuildContext) error {
+	if ctx.Target == canonicalRuntimeTarget() {
+		return nil
+	}
+	return fmt.Errorf("%s cross-target build not implemented (requested %q on host %q)", runnerName, ctx.Target, canonicalRuntimeTarget())
+}
+
+func cmakeBuildConfig(mode string) string {
+	switch normalizeBuildMode(mode) {
+	case buildModeRelease:
+		return "Release"
+	case buildModeProfile:
+		return "RelWithDebInfo"
+	default:
+		return "Debug"
+	}
+}
+
+func manifestRelativePath(manifest *LoadedManifest, absPath string) string {
+	rel, err := filepath.Rel(manifest.Dir, absPath)
+	if err != nil {
+		return filepath.ToSlash(absPath)
+	}
+	return filepath.ToSlash(rel)
 }
 
 func installHint(command string) string {

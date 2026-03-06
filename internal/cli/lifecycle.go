@@ -78,47 +78,58 @@ func formatLifecycleReport(format Format, report holons.Report) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Operation: %s\n", report.Operation)
-	fmt.Fprintf(&b, "Holon: %s\n", defaultDash(report.Holon))
-	fmt.Fprintf(&b, "Dir: %s\n", defaultDash(report.Dir))
+	writeLifecycleText(&b, report, "")
+	return strings.TrimSpace(b.String())
+}
+
+func writeLifecycleText(b *strings.Builder, report holons.Report, indent string) {
+	writeLifecycleLine(b, indent, "Operation: %s", report.Operation)
+	writeLifecycleLine(b, indent, "Holon: %s", defaultDash(report.Holon))
+	writeLifecycleLine(b, indent, "Dir: %s", defaultDash(report.Dir))
 	if report.Manifest != "" {
-		fmt.Fprintf(&b, "Manifest: %s\n", report.Manifest)
+		writeLifecycleLine(b, indent, "Manifest: %s", report.Manifest)
 	}
 	if report.Runner != "" {
-		fmt.Fprintf(&b, "Runner: %s\n", report.Runner)
+		writeLifecycleLine(b, indent, "Runner: %s", report.Runner)
 	}
 	if report.Kind != "" {
-		fmt.Fprintf(&b, "Kind: %s\n", report.Kind)
+		writeLifecycleLine(b, indent, "Kind: %s", report.Kind)
 	}
 	if report.Binary != "" {
-		fmt.Fprintf(&b, "Binary: %s\n", report.Binary)
+		writeLifecycleLine(b, indent, "Binary: %s", report.Binary)
 	}
 	if report.BuildTarget != "" {
-		fmt.Fprintf(&b, "Target: %s\n", report.BuildTarget)
+		writeLifecycleLine(b, indent, "Target: %s", report.BuildTarget)
 	}
 	if report.BuildMode != "" {
-		fmt.Fprintf(&b, "Mode: %s\n", report.BuildMode)
+		writeLifecycleLine(b, indent, "Mode: %s", report.BuildMode)
 	}
 	if report.Artifact != "" {
-		fmt.Fprintf(&b, "Artifact: %s\n", report.Artifact)
+		writeLifecycleLine(b, indent, "Artifact: %s", report.Artifact)
 	}
 	if len(report.Commands) > 0 {
-		b.WriteString("Commands:\n")
+		writeLifecycleLine(b, indent, "Commands:")
 		for _, command := range report.Commands {
-			fmt.Fprintf(&b, "- %s\n", command)
+			writeLifecycleLine(b, indent, "- %s", command)
 		}
 	}
 	if len(report.Notes) > 0 {
-		b.WriteString("Notes:\n")
+		writeLifecycleLine(b, indent, "Notes:")
 		for _, note := range report.Notes {
-			fmt.Fprintf(&b, "- %s\n", note)
+			writeLifecycleLine(b, indent, "- %s", note)
 		}
 	}
 	if len(report.Children) > 0 {
-		b.WriteString("Children:\n")
-		for _, child := range report.Children {
-			fmt.Fprintf(&b, "  %s (%s): %s\n", child.Holon, child.Runner, strings.Join(child.Notes, ", "))
+		writeLifecycleLine(b, indent, "Children:")
+		for i, child := range report.Children {
+			writeLifecycleText(b, child, indent+"  ")
+			if i < len(report.Children)-1 {
+				b.WriteString("\n")
+			}
 		}
 	}
-	return strings.TrimSpace(b.String())
+}
+
+func writeLifecycleLine(b *strings.Builder, indent, format string, args ...any) {
+	fmt.Fprintf(b, indent+format+"\n", args...)
 }
