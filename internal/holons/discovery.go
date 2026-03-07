@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	openv "github.com/organic-programming/grace-op/internal/env"
 	"github.com/organic-programming/sophia-who/pkg/identity"
 )
 
@@ -33,6 +34,7 @@ type Target struct {
 type LocalHolon struct {
 	Dir          string
 	RelativePath string
+	Origin       string
 	Identity     identity.Identity
 	IdentityPath string
 	Manifest     *LoadedManifest
@@ -55,13 +57,49 @@ func KnownRoots() []string {
 	return roots
 }
 
+func KnownRootLabels() []string {
+	base := workspaceRoot()
+	seen := make(map[string]struct{}, len(searchRootCandidates))
+	labels := make([]string, 0, len(searchRootCandidates))
+	for _, candidate := range searchRootCandidates {
+		cleaned := filepath.Clean(filepath.Join(base, candidate))
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
+			labels = append(labels, filepath.ToSlash(candidate))
+			seen[cleaned] = struct{}{}
+		}
+	}
+	return labels
+}
+
 func DiscoverLocalHolons() ([]LocalHolon, error) {
+	return discoverHolonsInRoots(KnownRoots(), "local", holonRelativePath)
+}
+
+func DiscoverCachedHolons() ([]LocalHolon, error) {
+	cacheDir := openv.CacheDir()
+	info, err := os.Stat(cacheDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, nil
+	}
+	return discoverHolonsInRoots([]string{cacheDir}, "cached", cacheRelativePath)
+}
+
+func discoverHolonsInRoots(roots []string, origin string, relPath func(string, string) string) ([]LocalHolon, error) {
 	var (
 		entries []LocalHolon
 		seen    = make(map[string]struct{})
 	)
 
-	for _, root := range KnownRoots() {
+	for _, root := range roots {
 		located, err := identity.FindAllWithPaths(root)
 		if err != nil {
 			return nil, err
@@ -85,7 +123,8 @@ func DiscoverLocalHolons() ([]LocalHolon, error) {
 
 			entries = append(entries, LocalHolon{
 				Dir:          absDir,
-				RelativePath: holonRelativePath(root, dir),
+				RelativePath: relPath(root, dir),
+				Origin:       origin,
 				Identity:     holon.Identity,
 				IdentityPath: holon.Path,
 				Manifest:     manifest,
@@ -161,6 +200,10 @@ func ResolveBinary(name string) (string, error) {
 	}
 
 	for _, candidate := range uniqueNonEmpty(names) {
+		installed := filepath.Join(openv.OPBIN(), candidate)
+		if info, statErr := os.Stat(installed); statErr == nil && !info.IsDir() {
+			return installed, nil
+		}
 		if path, lookErr := exec.LookPath(candidate); lookErr == nil {
 			return path, nil
 		}
@@ -222,7 +265,36 @@ func DiscoverInPath() []string {
 		if err != nil {
 			continue
 		}
+		if strings.HasPrefix(path, filepath.Clean(openv.OPBIN())+string(os.PathSeparator)) {
+			continue
+		}
 		found = append(found, fmt.Sprintf("%s -> %s", name, path))
+	}
+	sort.Strings(found)
+	return found
+}
+
+func DiscoverInOPBIN() []string {
+	opbin := openv.OPBIN()
+	entries, err := os.ReadDir(opbin)
+	if err != nil {
+		return nil
+	}
+
+	found := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		path := filepath.Join(opbin, entry.Name())
+		found = append(found, fmt.Sprintf("%s -> %s", entry.Name(), path))
 	}
 	sort.Strings(found)
 	return found
@@ -315,6 +387,20 @@ func holonRelativePath(root, dir string) string {
 
 	if rel, err := filepath.Rel(workspaceRoot(), dir); err == nil {
 		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(dir)
+}
+
+func cacheRelativePath(root, dir string) string {
+	root = filepath.Clean(root)
+	dir = filepath.Clean(dir)
+	if rel, err := filepath.Rel(root, dir); err == nil {
+		if rel == "." {
+			return "."
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return filepath.ToSlash(rel)
+		}
 	}
 	return filepath.ToSlash(dir)
 }

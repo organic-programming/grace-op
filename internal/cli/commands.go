@@ -43,10 +43,18 @@ func Run(args []string, version string) int {
 		return cmdLifecycle(format, holons.OperationTest, rest)
 	case "clean":
 		return cmdLifecycle(format, holons.OperationClean, rest)
+	case "install":
+		return cmdInstall(format, rest)
+	case "uninstall":
+		return cmdUninstall(format, rest)
+	case "mod":
+		return cmdMod(format, rest)
 	case "run":
 		return cmdRun(rest)
 	case "discover":
 		return cmdDiscover(format)
+	case "env":
+		return cmdEnv(format, rest)
 	case "serve":
 		return cmdServe(rest)
 	case "version":
@@ -56,7 +64,7 @@ func Run(args []string, version string) int {
 		PrintUsage()
 		return 0
 	case "new", "list", "show":
-		return cmdPromotedVerb(format, cmd, rest)
+		return cmdWho(format, cmd, rest)
 
 	// --- URI dispatch: grpc://, grpc+stdio://, grpc+unix://, grpc+ws:// ---
 	default:
@@ -92,13 +100,17 @@ Direct gRPC URI dispatch:
   op run <holon> --listen <URI>          start with any transport
 
 OP commands:
-  op list [root]                         promoted verb via sophia-who
-  op show <uuid>                         promoted verb via sophia-who
-  op new <json>                          promoted verb via sophia-who
+  op list [root]                         list local + cached holons natively
+  op show <uuid>                         display a holon identity natively
+  op new [--json <payload>]              create a holon identity natively
   op check [<holon-or-path>]             validate holon.yaml and prerequisites
   op build [<holon-or-path>] [flags]     build a holon artifact via its runner
   op test [<holon-or-path>]              run a holon's test contract
   op clean [<holon-or-path>]             remove .op/ build outputs
+  op install [<holon-or-path>]           install a built artifact into $OPBIN
+  op uninstall <holon>                   remove an installed artifact from $OPBIN
+  op mod <command>                       manage holon.mod and holon.sum
+  op env [--init] [--shell]              print resolved OPPATH / OPBIN / roots
 
 Build flags:
   --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
@@ -125,8 +137,9 @@ type discoverEntry struct {
 }
 
 type discoverOutput struct {
-	Entries      []discoverEntry `json:"entries"`
-	PathBinaries []string        `json:"path_binaries"`
+	Entries           []discoverEntry `json:"entries"`
+	InstalledBinaries []string        `json:"installed_binaries,omitempty"`
+	PathBinaries      []string        `json:"path_binaries"`
 }
 
 func cmdDiscover(format Format) int {
@@ -135,9 +148,14 @@ func cmdDiscover(format Format) int {
 		fmt.Fprintf(os.Stderr, "op discover: %v\n", err)
 		return 1
 	}
+	cached, err := holons.DiscoverCachedHolons()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "op discover: %v\n", err)
+		return 1
+	}
 
-	entries := make([]discoverEntry, 0, len(located))
-	for _, h := range located {
+	entries := make([]discoverEntry, 0, len(located)+len(cached))
+	for _, h := range append(append([]holons.LocalHolon{}, located...), cached...) {
 		entries = append(entries, discoverEntry{
 			UUID:         h.Identity.UUID,
 			GivenName:    h.Identity.GivenName,
@@ -146,15 +164,17 @@ func cmdDiscover(format Format) int {
 			Clade:        h.Identity.Clade,
 			Status:       h.Identity.Status,
 			RelativePath: h.RelativePath,
-			Origin:       "local",
+			Origin:       discoverOrigin(h.Origin),
 		})
 	}
+	installedHolons := holons.DiscoverInOPBIN()
 	pathHolons := discoverInPath()
 
 	if format == FormatJSON {
 		payload := discoverOutput{
-			Entries:      entries,
-			PathBinaries: pathHolons,
+			Entries:           entries,
+			InstalledBinaries: installedHolons,
+			PathBinaries:      pathHolons,
 		}
 		out, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
@@ -165,13 +185,13 @@ func cmdDiscover(format Format) int {
 		return 0
 	}
 
-	printDiscoverTable(entries, pathHolons)
+	printDiscoverTable(entries, installedHolons, pathHolons)
 	return 0
 }
 
-func printDiscoverTable(entries []discoverEntry, pathHolons []string) {
+func printDiscoverTable(entries []discoverEntry, installedHolons, pathHolons []string) {
 	if len(entries) == 0 {
-		fmt.Println("No local holons found in known roots.")
+		fmt.Println("No holons found in known roots.")
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tLANG\tCLADE\tSTATUS\tORIGIN\tREL_PATH\tUUID")
@@ -191,6 +211,13 @@ func printDiscoverTable(entries []discoverEntry, pathHolons []string) {
 		_ = w.Flush()
 	}
 
+	if len(installedHolons) > 0 {
+		fmt.Println("\nIn $OPBIN:")
+		for _, name := range installedHolons {
+			fmt.Printf("  %s\n", name)
+		}
+	}
+
 	if len(pathHolons) > 0 {
 		fmt.Println("\nIn $PATH:")
 		for _, name := range pathHolons {
@@ -207,8 +234,11 @@ func discoverDisplayName(entry discoverEntry) string {
 	return name
 }
 
-func cmdPromotedVerb(format Format, verb string, args []string) int {
-	return cmdHolon(format, "sophia-who", append([]string{verb}, args...))
+func discoverOrigin(origin string) string {
+	if strings.TrimSpace(origin) == "" {
+		return "local"
+	}
+	return origin
 }
 
 func cmdServe(args []string) int {

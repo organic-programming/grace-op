@@ -28,20 +28,20 @@ sudo mv op /usr/local/bin/   # or anywhere in your PATH
 ## Usage
 
 ```
-# Promoted verbs (delegated to the `sophia-who` holon over mem://)
+# Identity commands
 op new                               → create a new holon identity
 op list                              → list all known holons
 op show <uuid>                       → display a holon's identity
-op pin <uuid> --version 1.0.0        → capture version/commit/arch
 
 # Full namespace (dispatch to any holon binary)
 op sophia-who list                   → direct holon dispatch
 op who list                          → alias of sophia-who
-op atlas pull                        → marco-atlas
 op translate file.md --to fr         → abel-fishel-translator
 
 # OP's own commands
 op discover                          → list all available holons
+op mod pull                          → fetch dependencies into $OPPATH/cache
+op env --shell                       → print shell setup
 op version                           → show op version
 ```
 
@@ -74,7 +74,7 @@ op grpc+stdio://sophia-who ListIdentities '{}'
 
 ## Status
 
-v0.1.0 — promoted verbs, discover, namespace dispatch.
+v0.1.0 — native identity commands, dependency commands, discover, namespace dispatch.
 
 ## Design Drafts
 
