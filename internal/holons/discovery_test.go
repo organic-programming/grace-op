@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/organic-programming/sophia-who/pkg/identity"
+	"github.com/organic-programming/grace-op/pkg/identity"
 )
 
 func TestDiscoverHolonsRecursesAndSkipsExcludedDirs(t *testing.T) {

@@ -12,7 +12,7 @@ born: "2026-02-12"
 # ── Lineage ───────────────────────────────────────────
 parents: ['b00932e5-49d4-4724-ab4b-e2fc9e22e108']
 reproduction: manual
-generated_by: sophia-who
+generated_by: codex
 
 # ── Description ───────────────────────────────────────
 description: |
@@ -39,12 +39,34 @@ skills:
       - Build and test the artifact with `op build <holon>` and `op test <holon>`
       - Launch or dispatch with `op run <holon>` or `op <holon> <command>`
       - Clean and uninstall when finished with `op clean <holon>` and `op uninstall <holon>`
+  - name: introspect-holon
+    description: Inspect a holon's RPC contract, fields, and skills offline.
+    when: User wants to understand a holon's API without running it.
+    steps:
+      - Run `op inspect <holon>` for human-readable proto docs
+      - Use `op inspect <holon> --json` for machine-readable output
+      - Fallback to `op inspect <host:port>` for a running holon via Describe RPC
+  - name: expose-to-llm
+    description: Expose any holon as MCP tools for LLM integration.
+    when: User wants an AI agent to call holon RPCs.
+    steps:
+      - Start the MCP bridge with `op mcp <holon>`
+      - Or export tool definitions with `op tools <holon> --format openai`
+      - Skills from holon.yaml are exposed as MCP prompts alongside tools
+  - name: manage-dependencies
+    description: Manage holon dependencies like Go modules.
+    when: User needs to add, update, or audit holon deps.
+    steps:
+      - Initialize with `op mod init <holon-path>`
+      - Add dependencies with `op mod add <module> [version]`
+      - Tidy and verify with `op mod tidy`
+      - Inspect the graph with `op mod graph`
 
 # ── Contract ──────────────────────────────────────────
 contract:
   proto: protos/op/v1/op.proto
   service: OPService
-  rpcs: [Discover, Invoke, CreateIdentity, ListIdentities, ]
+  rpcs: [Discover, Invoke, CreateIdentity, ListIdentities, ShowIdentity]
 
 # ── Operational ───────────────────────────────────────
 kind: native

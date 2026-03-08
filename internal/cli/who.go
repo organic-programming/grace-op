@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
+	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"github.com/organic-programming/grace-op/internal/suggest"
 	"github.com/organic-programming/grace-op/internal/who"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -75,7 +75,7 @@ func cmdWhoNew(format Format, globalQuiet bool, args []string) int {
 	}
 
 	var resp proto.Message
-	var createdResp *sophiapb.CreateIdentityResponse
+	var createdResp *opv1.CreateIdentityResponse
 	if payload == "" {
 		created, createErr := who.CreateInteractive(os.Stdin, os.Stdout)
 		if createErr != nil {

@@ -12,8 +12,8 @@ import (
 
 	holonsgrpcclient "github.com/organic-programming/go-holons/pkg/grpcclient"
 	"github.com/organic-programming/go-holons/pkg/transport"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
-	sophiaservice "github.com/organic-programming/sophia-who/pkg/service"
+	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
+	"github.com/organic-programming/grace-op/internal/server"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -37,7 +37,7 @@ var sophiaMemComposer = &memHolonComposer{
 var memComposeRegistry = map[string]*memHolonComposer{}
 
 func registerSophiaWhoService(s *grpc.Server) {
-	sophiaservice.RegisterGRPC(s)
+	opv1.RegisterOPServiceServer(s, &server.Server{})
 }
 
 func dialMemHolon(ctx context.Context, holonName string) (*grpc.ClientConn, error) {
@@ -118,11 +118,11 @@ func callViaMem(holonName, methodName, inputJSON string) (string, error) {
 
 func callSophiaWhoRPC(ctx context.Context, conn *grpc.ClientConn, methodName, inputJSON string) (string, error) {
 	method := canonicalMethodName(methodName)
-	client := sophiapb.NewSophiaWhoServiceClient(conn)
+	client := opv1.NewOPServiceClient(conn)
 
 	switch method {
 	case "CreateIdentity":
-		req := &sophiapb.CreateIdentityRequest{}
+		req := &opv1.CreateIdentityRequest{}
 		if err := unmarshalProtoJSON(inputJSON, req); err != nil {
 			return "", fmt.Errorf("parse input JSON: %w", err)
 		}
@@ -132,7 +132,7 @@ func callSophiaWhoRPC(ctx context.Context, conn *grpc.ClientConn, methodName, in
 		}
 		return marshalProtoJSON(resp)
 	case "ShowIdentity":
-		req := &sophiapb.ShowIdentityRequest{}
+		req := &opv1.ShowIdentityRequest{}
 		if err := unmarshalProtoJSON(inputJSON, req); err != nil {
 			return "", fmt.Errorf("parse input JSON: %w", err)
 		}
@@ -142,7 +142,7 @@ func callSophiaWhoRPC(ctx context.Context, conn *grpc.ClientConn, methodName, in
 		}
 		return marshalProtoJSON(resp)
 	case "ListIdentities":
-		req := &sophiapb.ListIdentitiesRequest{}
+		req := &opv1.ListIdentitiesRequest{}
 		if err := unmarshalProtoJSON(inputJSON, req); err != nil {
 			return "", fmt.Errorf("parse input JSON: %w", err)
 		}

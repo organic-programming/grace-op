@@ -1,20 +1,18 @@
 // Organic Programming — OP Service Contract
 //
 // OP is the unified entry point to the Organic Programming ecosystem.
-// It discovers holons, dispatches commands, and promotes Sophia's
-// identity verbs for convenience.
+// It discovers holons, dispatches commands, and manages identity.
+// Identity types (formerly in sophia-who) are defined inline below.
 
 syntax = "proto3";
 
 package op.v1;
 
-import "sophia_who/v1/sophia_who.proto";
-
 option go_package = "github.com/organic-programming/grace-op/gen/go/op/v1;opv1";
 
 // OPService is the unified Organic Programming dispatcher.
 service OPService {
-  // --- OP's own RPCs ---
+  // --- Discovery & Dispatch ---
 
   // Discover scans for all known holons (local and cached).
   // @example {"root_dir":"./organic-programming"}
@@ -24,22 +22,87 @@ service OPService {
   // @example {"holon":"rob-go","args":["build","./cmd/rob-go"]}
   rpc Invoke (InvokeRequest) returns (InvokeResponse);
 
-  // --- Promoted from Sophia Who? (identity management) ---
+  // --- Identity Management ---
 
   // CreateIdentity creates a new holon identity.
   // @example {"given_name":"Megg","family_name":"FFmpeg","motto":"Cut precisely.","composer":"B. ALTER","clade":"DETERMINISTIC_IO_BOUND","output_dir":"holons/megg-ffmpeg"}
-  rpc CreateIdentity (sophia_who.v1.CreateIdentityRequest) returns (sophia_who.v1.CreateIdentityResponse);
+  rpc CreateIdentity (CreateIdentityRequest) returns (CreateIdentityResponse);
 
   // ListIdentities lists all known holon identities.
   // @example {}
-  rpc ListIdentities (sophia_who.v1.ListIdentitiesRequest) returns (sophia_who.v1.ListIdentitiesResponse);
+  rpc ListIdentities (ListIdentitiesRequest) returns (ListIdentitiesResponse);
 
   // ShowIdentity retrieves a holon's identity by UUID.
   // @example {"uuid":"31d98dfa-c08e-4db5-ab4f-180cecad50ef"}
-  rpc ShowIdentity (sophia_who.v1.ShowIdentityRequest) returns (sophia_who.v1.ShowIdentityResponse);
+  rpc ShowIdentity (ShowIdentityRequest) returns (ShowIdentityResponse);
 }
 
-// --- Discover ---
+// ─── Enums ───────────────────────────────────────────────────────
+
+// Clade enumerates the computational nature of a holon.
+enum Clade {
+  CLADE_UNSPECIFIED = 0;
+  DETERMINISTIC_PURE = 1;
+  DETERMINISTIC_STATEFUL = 2;
+  DETERMINISTIC_IO_BOUND = 3;
+  PROBABILISTIC_GENERATIVE = 4;
+  PROBABILISTIC_PERCEPTUAL = 5;
+  PROBABILISTIC_ADAPTIVE = 6;
+}
+
+// ReproductionMode describes how a holon was created.
+enum ReproductionMode {
+  REPRODUCTION_UNSPECIFIED = 0;
+  MANUAL = 1;
+  ASSISTED = 2;
+  AUTOMATIC = 3;
+  AUTOPOIETIC = 4;
+  BRED = 5;
+}
+
+// Status represents the lifecycle stage of a holon.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  DRAFT = 1;
+  STABLE = 2;
+  DEPRECATED = 3;
+  DEAD = 4;
+}
+
+// ─── Identity ────────────────────────────────────────────────────
+
+// HolonIdentity is the complete civil status of a holon.
+message HolonIdentity {
+  // @required
+  string uuid = 1;
+  // @required
+  string given_name = 2;
+  // @required
+  string family_name = 3;
+  // @required
+  string motto = 4;
+  // @required
+  string composer = 5;
+  // @required
+  Clade clade = 6;
+  Status status = 7;
+  // ISO 8601 date.
+  string born = 8;
+
+  // Lineage
+  repeated string parents = 9;
+  ReproductionMode reproduction = 10;
+
+  // Optional
+  repeated string aliases = 18;
+
+  // Metadata
+  string generated_by = 20;
+  string lang = 21;
+  Status proto_status = 22;
+}
+
+// ─── Discover ────────────────────────────────────────────────────
 
 message DiscoverRequest {
   // Directory to scan. Defaults to the current working directory.
@@ -50,27 +113,26 @@ message DiscoverRequest {
 message DiscoverResponse {
   // Holons discovered under the requested root and cache.
   repeated HolonEntry entries = 1;
-
   // Holon binaries found in $PATH.
   repeated string path_binaries = 2;
 }
 
+// HolonEntry pairs an identity with its discovery origin.
 message HolonEntry {
-  // Identity loaded from the holon's manifest.
-  sophia_who.v1.HolonIdentity identity = 1;
-
-  // Discovery origin, usually "local" or "cached".
+  HolonIdentity identity = 1;
+  // "local" or "cached".
   string origin = 2;
+  // Holon directory, relative to the scan root.
+  string relative_path = 3;
 }
 
-// --- Invoke ---
+// ─── Invoke ──────────────────────────────────────────────────────
 
 message InvokeRequest {
   // Holon name or alias to dispatch to.
   // @required
   // @example "rob-go"
   string holon = 1;
-
   // Arguments passed to the holon command.
   // @example ["build","./cmd/rob-go"]
   repeated string args = 2;
@@ -79,12 +141,60 @@ message InvokeRequest {
 message InvokeResponse {
   // Process exit code returned by the holon command.
   int32 exit_code = 1;
-
   // Standard output captured from the command.
   string stdout = 2;
-
   // Standard error captured from the command.
   string stderr = 3;
 }
 
-// --- Identity (promoted from Sophia) ---
+// ─── CreateIdentity ──────────────────────────────────────────────
+
+message CreateIdentityRequest {
+  // @required
+  string given_name = 1;
+  // @required
+  string family_name = 2;
+  // @required
+  string motto = 3;
+  // @required
+  string composer = 4;
+  // @required
+  Clade clade = 5;
+  ReproductionMode reproduction = 6;
+  string lang = 7;
+  repeated string aliases = 8;
+  // Default: holons/<name>/
+  string output_dir = 10;
+}
+
+message CreateIdentityResponse {
+  HolonIdentity identity = 1;
+  // Where holon.yaml was written.
+  string file_path = 2;
+}
+
+// ─── ShowIdentity ────────────────────────────────────────────────
+
+message ShowIdentityRequest {
+  // Full UUID or prefix.
+  // @required
+  string uuid = 1;
+}
+
+message ShowIdentityResponse {
+  HolonIdentity identity = 1;
+  string file_path = 2;
+  // The full holon.yaml file content.
+  string raw_content = 3;
+}
+
+// ─── ListIdentities ──────────────────────────────────────────────
+
+message ListIdentitiesRequest {
+  // Directory to scan. Default: current dir.
+  string root_dir = 1;
+}
+
+message ListIdentitiesResponse {
+  repeated HolonEntry entries = 1;
+}

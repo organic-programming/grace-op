@@ -10,23 +10,23 @@ import (
 	"sort"
 	"strings"
 
+	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	openv "github.com/organic-programming/grace-op/internal/env"
 	"github.com/organic-programming/grace-op/internal/holons"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
-	"github.com/organic-programming/sophia-who/pkg/identity"
+	"github.com/organic-programming/grace-op/pkg/identity"
 )
 
 // List returns local and cached identities, preserving their origin labels.
-func List(root string) (*sophiapb.ListIdentitiesResponse, error) {
+func List(root string) (*opv1.ListIdentitiesResponse, error) {
 	if strings.TrimSpace(root) == "" {
 		root = "."
 	}
 
-	var entries []*sophiapb.HolonEntry
+	var entries []*opv1.HolonEntry
 
 	appendEntries := func(located []holons.LocalHolon) {
 		for _, holon := range located {
-			entries = append(entries, &sophiapb.HolonEntry{
+			entries = append(entries, &opv1.HolonEntry{
 				Identity:     toProto(holon.Identity),
 				Origin:       holon.Origin,
 				RelativePath: filepath.Clean(holon.RelativePath),
@@ -56,11 +56,11 @@ func List(root string) (*sophiapb.ListIdentitiesResponse, error) {
 		return entries[i].GetOrigin() < entries[j].GetOrigin()
 	})
 
-	return &sophiapb.ListIdentitiesResponse{Entries: entries}, nil
+	return &opv1.ListIdentitiesResponse{Entries: entries}, nil
 }
 
 // Show resolves an identity by UUID or prefix, searching local first then cache.
-func Show(target string) (*sophiapb.ShowIdentityResponse, error) {
+func Show(target string) (*opv1.ShowIdentityResponse, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, fmt.Errorf("uuid is required")
@@ -102,7 +102,7 @@ func Show(target string) (*sophiapb.ShowIdentityResponse, error) {
 		return nil, err
 	}
 
-	return &sophiapb.ShowIdentityResponse{
+	return &opv1.ShowIdentityResponse{
 		Identity:   toProto(id),
 		FilePath:   path,
 		RawContent: string(raw),
@@ -110,7 +110,7 @@ func Show(target string) (*sophiapb.ShowIdentityResponse, error) {
 }
 
 // CreateFromJSON creates an identity from a non-interactive JSON payload.
-func CreateFromJSON(raw string) (*sophiapb.CreateIdentityResponse, error) {
+func CreateFromJSON(raw string) (*opv1.CreateIdentityResponse, error) {
 	req, err := parseCreateIdentityJSON(raw)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func CreateFromJSON(raw string) (*sophiapb.CreateIdentityResponse, error) {
 }
 
 // CreateInteractive interactively scaffolds a new identity using stdin/stdout.
-func CreateInteractive(in io.Reader, out io.Writer) (*sophiapb.CreateIdentityResponse, error) {
+func CreateInteractive(in io.Reader, out io.Writer) (*opv1.CreateIdentityResponse, error) {
 	scanner := bufio.NewScanner(in)
 	id := identity.New()
 	id.GeneratedBy = "op"
@@ -127,7 +127,7 @@ func CreateInteractive(in io.Reader, out io.Writer) (*sophiapb.CreateIdentityRes
 	fmt.Fprintln(out, "─── op new — New Holon Identity ───")
 	fmt.Fprintf(out, "UUID: %s (generated)\n\n", id.UUID)
 
-	req := &sophiapb.CreateIdentityRequest{}
+	req := &opv1.CreateIdentityRequest{}
 	req.FamilyName = ask(scanner, out, "Family name (the function)")
 	req.GivenName = ask(scanner, out, "Given name (the character)")
 	req.Composer = ask(scanner, out, "Composer")
@@ -152,7 +152,7 @@ func CreateInteractive(in io.Reader, out io.Writer) (*sophiapb.CreateIdentityRes
 }
 
 // Create creates a new identity and writes holon.yaml.
-func Create(req *sophiapb.CreateIdentityRequest) (*sophiapb.CreateIdentityResponse, error) {
+func Create(req *opv1.CreateIdentityRequest) (*opv1.CreateIdentityResponse, error) {
 	if err := validateCreateRequest(req); err != nil {
 		return nil, err
 	}
@@ -186,13 +186,13 @@ func Create(req *sophiapb.CreateIdentityRequest) (*sophiapb.CreateIdentityRespon
 		return nil, fmt.Errorf("write holon.yaml: %w", err)
 	}
 
-	return &sophiapb.CreateIdentityResponse{
+	return &opv1.CreateIdentityResponse{
 		Identity: toProto(id),
 		FilePath: outputPath,
 	}, nil
 }
 
-func parseCreateIdentityJSON(raw string) (*sophiapb.CreateIdentityRequest, error) {
+func parseCreateIdentityJSON(raw string) (*opv1.CreateIdentityRequest, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, fmt.Errorf("json payload is required")
@@ -203,7 +203,7 @@ func parseCreateIdentityJSON(raw string) (*sophiapb.CreateIdentityRequest, error
 		return nil, err
 	}
 
-	req := &sophiapb.CreateIdentityRequest{
+	req := &opv1.CreateIdentityRequest{
 		GivenName:    jsonString(payload, "given_name", "givenName"),
 		FamilyName:   jsonString(payload, "family_name", "familyName"),
 		Motto:        jsonString(payload, "motto"),
@@ -273,7 +273,7 @@ func askChoice(scanner *bufio.Scanner, out io.Writer, prompt string, choices []s
 	}
 }
 
-func validateCreateRequest(req *sophiapb.CreateIdentityRequest) error {
+func validateCreateRequest(req *opv1.CreateIdentityRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is required")
 	}
@@ -301,36 +301,36 @@ func slugFor(given, family string) string {
 	return strings.Trim(slug, "-")
 }
 
-func cladeString(value sophiapb.Clade) string {
+func cladeString(value opv1.Clade) string {
 	switch value {
-	case sophiapb.Clade_DETERMINISTIC_PURE:
+	case opv1.Clade_DETERMINISTIC_PURE:
 		return "deterministic/pure"
-	case sophiapb.Clade_DETERMINISTIC_STATEFUL:
+	case opv1.Clade_DETERMINISTIC_STATEFUL:
 		return "deterministic/stateful"
-	case sophiapb.Clade_DETERMINISTIC_IO_BOUND:
+	case opv1.Clade_DETERMINISTIC_IO_BOUND:
 		return "deterministic/io_bound"
-	case sophiapb.Clade_PROBABILISTIC_GENERATIVE:
+	case opv1.Clade_PROBABILISTIC_GENERATIVE:
 		return "probabilistic/generative"
-	case sophiapb.Clade_PROBABILISTIC_PERCEPTUAL:
+	case opv1.Clade_PROBABILISTIC_PERCEPTUAL:
 		return "probabilistic/perceptual"
-	case sophiapb.Clade_PROBABILISTIC_ADAPTIVE:
+	case opv1.Clade_PROBABILISTIC_ADAPTIVE:
 		return "probabilistic/adaptive"
 	default:
 		return ""
 	}
 }
 
-func reproductionString(value sophiapb.ReproductionMode) string {
+func reproductionString(value opv1.ReproductionMode) string {
 	switch value {
-	case sophiapb.ReproductionMode_MANUAL:
+	case opv1.ReproductionMode_MANUAL:
 		return "manual"
-	case sophiapb.ReproductionMode_ASSISTED:
+	case opv1.ReproductionMode_ASSISTED:
 		return "assisted"
-	case sophiapb.ReproductionMode_AUTOMATIC:
+	case opv1.ReproductionMode_AUTOMATIC:
 		return "automatic"
-	case sophiapb.ReproductionMode_AUTOPOIETIC:
+	case opv1.ReproductionMode_AUTOPOIETIC:
 		return "autopoietic"
-	case sophiapb.ReproductionMode_BRED:
+	case opv1.ReproductionMode_BRED:
 		return "bred"
 	default:
 		return ""
@@ -358,8 +358,8 @@ func writeIdentityYAML(id identity.Identity, outputPath string) error {
 	return os.WriteFile(outputPath, []byte(strings.Join(filtered, "\n")), 0o644)
 }
 
-func toProto(id identity.Identity) *sophiapb.HolonIdentity {
-	return &sophiapb.HolonIdentity{
+func toProto(id identity.Identity) *opv1.HolonIdentity {
+	return &opv1.HolonIdentity{
 		Uuid:         id.UUID,
 		GivenName:    id.GivenName,
 		FamilyName:   id.FamilyName,
@@ -377,53 +377,53 @@ func toProto(id identity.Identity) *sophiapb.HolonIdentity {
 	}
 }
 
-func stringToClade(s string) sophiapb.Clade {
+func stringToClade(s string) opv1.Clade {
 	switch strings.TrimSpace(s) {
 	case "deterministic/pure":
-		return sophiapb.Clade_DETERMINISTIC_PURE
+		return opv1.Clade_DETERMINISTIC_PURE
 	case "deterministic/stateful":
-		return sophiapb.Clade_DETERMINISTIC_STATEFUL
+		return opv1.Clade_DETERMINISTIC_STATEFUL
 	case "deterministic/io_bound":
-		return sophiapb.Clade_DETERMINISTIC_IO_BOUND
+		return opv1.Clade_DETERMINISTIC_IO_BOUND
 	case "probabilistic/generative":
-		return sophiapb.Clade_PROBABILISTIC_GENERATIVE
+		return opv1.Clade_PROBABILISTIC_GENERATIVE
 	case "probabilistic/perceptual":
-		return sophiapb.Clade_PROBABILISTIC_PERCEPTUAL
+		return opv1.Clade_PROBABILISTIC_PERCEPTUAL
 	case "probabilistic/adaptive":
-		return sophiapb.Clade_PROBABILISTIC_ADAPTIVE
+		return opv1.Clade_PROBABILISTIC_ADAPTIVE
 	default:
-		return sophiapb.Clade_CLADE_UNSPECIFIED
+		return opv1.Clade_CLADE_UNSPECIFIED
 	}
 }
 
-func stringToStatus(s string) sophiapb.Status {
+func stringToStatus(s string) opv1.Status {
 	switch strings.TrimSpace(s) {
 	case "draft":
-		return sophiapb.Status_DRAFT
+		return opv1.Status_DRAFT
 	case "stable":
-		return sophiapb.Status_STABLE
+		return opv1.Status_STABLE
 	case "deprecated":
-		return sophiapb.Status_DEPRECATED
+		return opv1.Status_DEPRECATED
 	case "dead":
-		return sophiapb.Status_DEAD
+		return opv1.Status_DEAD
 	default:
-		return sophiapb.Status_STATUS_UNSPECIFIED
+		return opv1.Status_STATUS_UNSPECIFIED
 	}
 }
 
-func stringToReproduction(s string) sophiapb.ReproductionMode {
+func stringToReproduction(s string) opv1.ReproductionMode {
 	switch strings.TrimSpace(s) {
 	case "manual":
-		return sophiapb.ReproductionMode_MANUAL
+		return opv1.ReproductionMode_MANUAL
 	case "assisted":
-		return sophiapb.ReproductionMode_ASSISTED
+		return opv1.ReproductionMode_ASSISTED
 	case "automatic":
-		return sophiapb.ReproductionMode_AUTOMATIC
+		return opv1.ReproductionMode_AUTOMATIC
 	case "autopoietic":
-		return sophiapb.ReproductionMode_AUTOPOIETIC
+		return opv1.ReproductionMode_AUTOPOIETIC
 	case "bred":
-		return sophiapb.ReproductionMode_BRED
+		return opv1.ReproductionMode_BRED
 	default:
-		return sophiapb.ReproductionMode_REPRODUCTION_UNSPECIFIED
+		return opv1.ReproductionMode_REPRODUCTION_UNSPECIFIED
 	}
 }

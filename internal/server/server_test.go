@@ -9,11 +9,9 @@ import (
 	"testing"
 
 	"github.com/organic-programming/go-holons/pkg/transport"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
-	"github.com/organic-programming/sophia-who/pkg/identity"
-
-	pb "github.com/organic-programming/grace-op/gen/go/op/v1"
+	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"github.com/organic-programming/grace-op/internal/grpcclient"
+	"github.com/organic-programming/grace-op/pkg/identity"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,7 +22,7 @@ import (
 const bufSize = 1024 * 1024
 
 // startTestServer launches an in-memory gRPC server.
-func startTestServer(t *testing.T, root string) (pb.OPServiceClient, func()) {
+func startTestServer(t *testing.T, root string) (opv1.OPServiceClient, func()) {
 	t.Helper()
 
 	original, err := os.Getwd()
@@ -37,7 +35,7 @@ func startTestServer(t *testing.T, root string) (pb.OPServiceClient, func()) {
 
 	lis := bufconn.Listen(bufSize)
 	s := grpc.NewServer()
-	pb.RegisterOPServiceServer(s, &Server{})
+	opv1.RegisterOPServiceServer(s, &Server{})
 
 	go func() { _ = s.Serve(lis) }()
 
@@ -58,7 +56,7 @@ func startTestServer(t *testing.T, root string) (pb.OPServiceClient, func()) {
 		os.Chdir(original) //nolint:errcheck
 	}
 
-	return pb.NewOPServiceClient(conn), cleanup
+	return opv1.NewOPServiceClient(conn), cleanup
 }
 
 // seedHolon creates a holon.yaml in a temp subdirectory.
@@ -92,7 +90,7 @@ func TestDiscoverEmpty(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.Discover(context.Background(), &pb.DiscoverRequest{})
+	resp, err := client.Discover(context.Background(), &opv1.DiscoverRequest{})
 	if err != nil {
 		t.Fatalf("Discover failed: %v", err)
 	}
@@ -109,7 +107,7 @@ func TestDiscoverWithHolons(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.Discover(context.Background(), &pb.DiscoverRequest{})
+	resp, err := client.Discover(context.Background(), &opv1.DiscoverRequest{})
 	if err != nil {
 		t.Fatalf("Discover failed: %v", err)
 	}
@@ -130,7 +128,7 @@ func TestInvokeUnknown(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.Invoke(context.Background(), &pb.InvokeRequest{
+	resp, err := client.Invoke(context.Background(), &opv1.InvokeRequest{
 		Holon: "nonexistent-holon",
 		Args:  []string{"hello"},
 	})
@@ -148,7 +146,7 @@ func TestInvokeEcho(t *testing.T) {
 	defer cleanup()
 
 	// "echo" is in $PATH on all platforms
-	resp, err := client.Invoke(context.Background(), &pb.InvokeRequest{
+	resp, err := client.Invoke(context.Background(), &opv1.InvokeRequest{
 		Holon: "echo",
 		Args:  []string{"hello", "from", "op"},
 	})
@@ -171,12 +169,12 @@ func TestCreateIdentity(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.CreateIdentity(context.Background(), &sophiapb.CreateIdentityRequest{
+	resp, err := client.CreateIdentity(context.Background(), &opv1.CreateIdentityRequest{
 		GivenName:  "NewHolon",
 		FamilyName: "RPC",
 		Motto:      "Born by gRPC.",
 		Composer:   "Test Suite",
-		Clade:      sophiapb.Clade_PROBABILISTIC_GENERATIVE,
+		Clade:      opv1.Clade_PROBABILISTIC_GENERATIVE,
 		OutputDir:  filepath.Join(root, "new-holon"),
 	})
 	if err != nil {
@@ -198,7 +196,7 @@ func TestCreateIdentityValidation(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	_, err := client.CreateIdentity(context.Background(), &sophiapb.CreateIdentityRequest{
+	_, err := client.CreateIdentity(context.Background(), &opv1.CreateIdentityRequest{
 		GivenName: "OnlyName",
 	})
 	if err == nil {
@@ -214,7 +212,7 @@ func TestListIdentities(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.ListIdentities(context.Background(), &sophiapb.ListIdentitiesRequest{})
+	resp, err := client.ListIdentities(context.Background(), &opv1.ListIdentitiesRequest{})
 	if err != nil {
 		t.Fatalf("ListIdentities failed: %v", err)
 	}
@@ -228,7 +226,7 @@ func TestListIdentitiesEmpty(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.ListIdentities(context.Background(), &sophiapb.ListIdentitiesRequest{})
+	resp, err := client.ListIdentities(context.Background(), &opv1.ListIdentitiesRequest{})
 	if err != nil {
 		t.Fatalf("ListIdentities failed: %v", err)
 	}
@@ -244,7 +242,7 @@ func TestShowIdentity(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	resp, err := client.ShowIdentity(context.Background(), &sophiapb.ShowIdentityRequest{
+	resp, err := client.ShowIdentity(context.Background(), &opv1.ShowIdentityRequest{
 		Uuid: "show-uuid-42",
 	})
 	if err != nil {
@@ -263,7 +261,7 @@ func TestShowIdentityNotFound(t *testing.T) {
 	client, cleanup := startTestServer(t, root)
 	defer cleanup()
 
-	_, err := client.ShowIdentity(context.Background(), &sophiapb.ShowIdentityRequest{
+	_, err := client.ShowIdentity(context.Background(), &opv1.ShowIdentityRequest{
 		Uuid: "nonexistent",
 	})
 	if err == nil {
@@ -304,7 +302,7 @@ func TestMemTransport(t *testing.T) {
 
 	mem := transport.NewMemListener()
 	s := grpc.NewServer()
-	pb.RegisterOPServiceServer(s, &Server{})
+	opv1.RegisterOPServiceServer(s, &Server{})
 	go func() { _ = s.Serve(mem) }()
 	defer s.Stop()
 
@@ -320,8 +318,8 @@ func TestMemTransport(t *testing.T) {
 	}
 	defer conn.Close()
 
-	client := pb.NewOPServiceClient(conn)
-	resp, err := client.Discover(context.Background(), &pb.DiscoverRequest{})
+	client := opv1.NewOPServiceClient(conn)
+	resp, err := client.Discover(context.Background(), &opv1.DiscoverRequest{})
 	if err != nil {
 		t.Fatalf("Discover over mem://: %v", err)
 	}
@@ -352,7 +350,7 @@ func TestWSTransport(t *testing.T) {
 	defer wsLis.Close()
 
 	s := grpc.NewServer()
-	pb.RegisterOPServiceServer(s, &Server{})
+	opv1.RegisterOPServiceServer(s, &Server{})
 	reflection.Register(s)
 	go func() { _ = s.Serve(wsLis) }()
 	defer s.Stop()

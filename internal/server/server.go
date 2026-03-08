@@ -10,12 +10,10 @@ import (
 	"strings"
 
 	"github.com/organic-programming/go-holons/pkg/transport"
+	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"github.com/organic-programming/grace-op/internal/holons"
 	"github.com/organic-programming/grace-op/internal/who"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
-	"github.com/organic-programming/sophia-who/pkg/identity"
-
-	pb "github.com/organic-programming/grace-op/gen/go/op/v1"
+	"github.com/organic-programming/grace-op/pkg/identity"
 
 	"google.golang.org/grpc"
 	grpcReflection "google.golang.org/grpc/reflection"
@@ -23,44 +21,45 @@ import (
 
 // Server implements the OPService gRPC interface.
 type Server struct {
-	pb.UnimplementedOPServiceServer
+	opv1.UnimplementedOPServiceServer
 }
 
 // --- OP-native RPCs ---
 
 // Discover scans for all known holons.
-func (s *Server) Discover(ctx context.Context, req *pb.DiscoverRequest) (*pb.DiscoverResponse, error) {
+func (s *Server) Discover(ctx context.Context, req *opv1.DiscoverRequest) (*opv1.DiscoverResponse, error) {
 	root := req.RootDir
 	if root == "" {
 		root = "."
 	}
 
-	localHolons, err := identity.FindAllWithPaths(root)
+	localHolons, err := holons.DiscoverHolons(root)
 	if err != nil {
 		return nil, err
 	}
 
-	entries := make([]*pb.HolonEntry, 0, len(localHolons))
+	entries := make([]*opv1.HolonEntry, 0, len(localHolons))
 	for _, h := range localHolons {
-		entries = append(entries, &pb.HolonEntry{
-			Identity: toProto(h.Identity),
-			Origin:   "local",
+		entries = append(entries, &opv1.HolonEntry{
+			Identity:     toProto(h.Identity),
+			Origin:       h.Origin,
+			RelativePath: h.RelativePath,
 		})
 	}
 
 	pathBinaries := holons.DiscoverInPath()
 
-	return &pb.DiscoverResponse{
+	return &opv1.DiscoverResponse{
 		Entries:      entries,
 		PathBinaries: pathBinaries,
 	}, nil
 }
 
 // Invoke dispatches a command to a holon by name.
-func (s *Server) Invoke(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeResponse, error) {
+func (s *Server) Invoke(ctx context.Context, req *opv1.InvokeRequest) (*opv1.InvokeResponse, error) {
 	binary, err := holons.ResolveBinary(req.Holon)
 	if err != nil {
-		return &pb.InvokeResponse{
+		return &opv1.InvokeResponse{
 			ExitCode: 1,
 			Stderr:   fmt.Sprintf("holon %q not found", req.Holon),
 		}, nil
@@ -80,22 +79,22 @@ func (s *Server) Invoke(ctx context.Context, req *pb.InvokeRequest) (*pb.InvokeR
 		}
 	}
 
-	return &pb.InvokeResponse{
+	return &opv1.InvokeResponse{
 		ExitCode: exitCode,
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 	}, nil
 }
 
-// --- Promoted identity RPCs (delegate to Sophia's API) ---
+// --- Promoted identity RPCs ---
 
 // CreateIdentity creates a new holon identity.
-func (s *Server) CreateIdentity(ctx context.Context, req *sophiapb.CreateIdentityRequest) (*sophiapb.CreateIdentityResponse, error) {
+func (s *Server) CreateIdentity(ctx context.Context, req *opv1.CreateIdentityRequest) (*opv1.CreateIdentityResponse, error) {
 	return who.Create(req)
 }
 
 // ListIdentities lists all known holon identities.
-func (s *Server) ListIdentities(ctx context.Context, req *sophiapb.ListIdentitiesRequest) (*sophiapb.ListIdentitiesResponse, error) {
+func (s *Server) ListIdentities(ctx context.Context, req *opv1.ListIdentitiesRequest) (*opv1.ListIdentitiesResponse, error) {
 	root := "."
 	if req != nil && req.GetRootDir() != "" {
 		root = req.GetRootDir()
@@ -104,7 +103,7 @@ func (s *Server) ListIdentities(ctx context.Context, req *sophiapb.ListIdentitie
 }
 
 // ShowIdentity retrieves a holon's identity by UUID.
-func (s *Server) ShowIdentity(ctx context.Context, req *sophiapb.ShowIdentityRequest) (*sophiapb.ShowIdentityResponse, error) {
+func (s *Server) ShowIdentity(ctx context.Context, req *opv1.ShowIdentityRequest) (*opv1.ShowIdentityResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("uuid is required")
 	}
@@ -120,7 +119,7 @@ func ListenAndServe(listenURI string, reflect bool) error {
 	}
 
 	s := grpc.NewServer()
-	pb.RegisterOPServiceServer(s, &Server{})
+	opv1.RegisterOPServiceServer(s, &Server{})
 	if reflect {
 		grpcReflection.Register(s)
 	}
@@ -135,8 +134,8 @@ func ListenAndServe(listenURI string, reflect bool) error {
 
 // --- Helpers ---
 
-func toProto(id identity.Identity) *sophiapb.HolonIdentity {
-	return &sophiapb.HolonIdentity{
+func toProto(id identity.Identity) *opv1.HolonIdentity {
+	return &opv1.HolonIdentity{
 		Uuid:         id.UUID,
 		GivenName:    id.GivenName,
 		FamilyName:   id.FamilyName,
@@ -154,54 +153,54 @@ func toProto(id identity.Identity) *sophiapb.HolonIdentity {
 	}
 }
 
-func cladeToProto(value string) sophiapb.Clade {
+func cladeToProto(value string) opv1.Clade {
 	switch lowerTrim(value) {
 	case "deterministic/pure":
-		return sophiapb.Clade_DETERMINISTIC_PURE
+		return opv1.Clade_DETERMINISTIC_PURE
 	case "deterministic/stateful":
-		return sophiapb.Clade_DETERMINISTIC_STATEFUL
+		return opv1.Clade_DETERMINISTIC_STATEFUL
 	case "deterministic/io_bound":
-		return sophiapb.Clade_DETERMINISTIC_IO_BOUND
+		return opv1.Clade_DETERMINISTIC_IO_BOUND
 	case "probabilistic/generative":
-		return sophiapb.Clade_PROBABILISTIC_GENERATIVE
+		return opv1.Clade_PROBABILISTIC_GENERATIVE
 	case "probabilistic/perceptual":
-		return sophiapb.Clade_PROBABILISTIC_PERCEPTUAL
+		return opv1.Clade_PROBABILISTIC_PERCEPTUAL
 	case "probabilistic/adaptive":
-		return sophiapb.Clade_PROBABILISTIC_ADAPTIVE
+		return opv1.Clade_PROBABILISTIC_ADAPTIVE
 	default:
-		return sophiapb.Clade_CLADE_UNSPECIFIED
+		return opv1.Clade_CLADE_UNSPECIFIED
 	}
 }
 
-func statusToProto(value string) sophiapb.Status {
+func statusToProto(value string) opv1.Status {
 	switch lowerTrim(value) {
 	case "draft":
-		return sophiapb.Status_DRAFT
+		return opv1.Status_DRAFT
 	case "stable":
-		return sophiapb.Status_STABLE
+		return opv1.Status_STABLE
 	case "deprecated":
-		return sophiapb.Status_DEPRECATED
+		return opv1.Status_DEPRECATED
 	case "dead":
-		return sophiapb.Status_DEAD
+		return opv1.Status_DEAD
 	default:
-		return sophiapb.Status_STATUS_UNSPECIFIED
+		return opv1.Status_STATUS_UNSPECIFIED
 	}
 }
 
-func reproductionToProto(value string) sophiapb.ReproductionMode {
+func reproductionToProto(value string) opv1.ReproductionMode {
 	switch lowerTrim(value) {
 	case "manual":
-		return sophiapb.ReproductionMode_MANUAL
+		return opv1.ReproductionMode_MANUAL
 	case "assisted":
-		return sophiapb.ReproductionMode_ASSISTED
+		return opv1.ReproductionMode_ASSISTED
 	case "automatic":
-		return sophiapb.ReproductionMode_AUTOMATIC
+		return opv1.ReproductionMode_AUTOMATIC
 	case "autopoietic":
-		return sophiapb.ReproductionMode_AUTOPOIETIC
+		return opv1.ReproductionMode_AUTOPOIETIC
 	case "bred":
-		return sophiapb.ReproductionMode_BRED
+		return opv1.ReproductionMode_BRED
 	default:
-		return sophiapb.ReproductionMode_REPRODUCTION_UNSPECIFIED
+		return opv1.ReproductionMode_REPRODUCTION_UNSPECIFIED
 	}
 }
 

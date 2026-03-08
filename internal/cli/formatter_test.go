@@ -5,19 +5,18 @@ import (
 	"testing"
 
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
 )
 
 func TestFormatResponse_ListIdentitiesText(t *testing.T) {
-	resp := &sophiapb.ListIdentitiesResponse{
-		Entries: []*sophiapb.HolonEntry{
+	resp := &opv1.ListIdentitiesResponse{
+		Entries: []*opv1.HolonEntry{
 			{
-				Identity: &sophiapb.HolonIdentity{
+				Identity: &opv1.HolonIdentity{
 					Uuid:       "12345678-90ab-cdef-1234-567890abcdef",
 					GivenName:  "Alpha",
 					FamilyName: "Holon",
-					Clade:      sophiapb.Clade_DETERMINISTIC_PURE,
-					Status:     sophiapb.Status_DRAFT,
+					Clade:      opv1.Clade_DETERMINISTIC_PURE,
+					Status:     opv1.Status_DRAFT,
 					Lang:       "go",
 				},
 				Origin:       "local",
@@ -42,15 +41,16 @@ func TestFormatResponse_DiscoverText(t *testing.T) {
 	resp := &opv1.DiscoverResponse{
 		Entries: []*opv1.HolonEntry{
 			{
-				Identity: &sophiapb.HolonIdentity{
+				Identity: &opv1.HolonIdentity{
 					Uuid:       "87654321-90ab-cdef-1234-567890abcdef",
 					GivenName:  "Who",
 					FamilyName: "Holon",
-					Clade:      sophiapb.Clade_DETERMINISTIC_PURE,
-					Status:     sophiapb.Status_STABLE,
+					Clade:      opv1.Clade_DETERMINISTIC_PURE,
+					Status:     opv1.Status_STABLE,
 					Lang:       "go",
 				},
-				Origin: "local",
+				Origin:       "local",
+				RelativePath: "holons/who",
 			},
 		},
 		PathBinaries: []string{"who -> /usr/local/bin/who"},
@@ -63,11 +63,14 @@ func TestFormatResponse_DiscoverText(t *testing.T) {
 	if !strings.Contains(out, "Who Holon") {
 		t.Fatalf("expected discover identity row, got: %q", out)
 	}
+	if !strings.Contains(out, "holons/who") {
+		t.Fatalf("expected discover relative path, got: %q", out)
+	}
 }
 
 func TestFormatResponse_JSON(t *testing.T) {
-	resp := &sophiapb.CreateIdentityResponse{
-		Identity: &sophiapb.HolonIdentity{GivenName: "Alpha"},
+	resp := &opv1.CreateIdentityResponse{
+		Identity: &opv1.HolonIdentity{GivenName: "Alpha"},
 	}
 
 	out := FormatResponse(FormatJSON, resp)
@@ -77,8 +80,8 @@ func TestFormatResponse_JSON(t *testing.T) {
 }
 
 func TestFormatResponse_TextUnknownFallsBackToJSON(t *testing.T) {
-	resp := &sophiapb.ShowIdentityResponse{
-		Identity: &sophiapb.HolonIdentity{Uuid: "abc123"},
+	resp := &opv1.ShowIdentityResponse{
+		Identity: &opv1.HolonIdentity{Uuid: "abc123"},
 	}
 
 	out := FormatResponse(FormatText, resp)

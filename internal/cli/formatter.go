@@ -8,7 +8,6 @@ import (
 	"text/tabwriter"
 
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
-	sophiapb "github.com/organic-programming/sophia-who/gen/go/sophia_who/v1"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -33,11 +32,11 @@ func FormatResponse(format Format, resp proto.Message) string {
 	}
 
 	switch typed := resp.(type) {
-	case *sophiapb.ListIdentitiesResponse:
+	case *opv1.ListIdentitiesResponse:
 		return formatListIdentitiesText(typed)
-	case *sophiapb.ShowIdentityResponse:
+	case *opv1.ShowIdentityResponse:
 		return formatShowIdentityText(typed)
-	case *sophiapb.CreateIdentityResponse:
+	case *opv1.CreateIdentityResponse:
 		return formatCreateIdentityText(typed)
 	case *opv1.DiscoverResponse:
 		return formatDiscoverText(typed)
@@ -66,11 +65,11 @@ func formatRPCOutput(format Format, method string, payload []byte) string {
 func responseMessageForMethod(method string) proto.Message {
 	switch canonicalMethodName(method) {
 	case "CreateIdentity":
-		return &sophiapb.CreateIdentityResponse{}
+		return &opv1.CreateIdentityResponse{}
 	case "ListIdentities":
-		return &sophiapb.ListIdentitiesResponse{}
+		return &opv1.ListIdentitiesResponse{}
 	case "ShowIdentity":
-		return &sophiapb.ShowIdentityResponse{}
+		return &opv1.ShowIdentityResponse{}
 	case "Discover":
 		return &opv1.DiscoverResponse{}
 	default:
@@ -78,7 +77,7 @@ func responseMessageForMethod(method string) proto.Message {
 	}
 }
 
-func formatCreateIdentityText(resp *sophiapb.CreateIdentityResponse) string {
+func formatCreateIdentityText(resp *opv1.CreateIdentityResponse) string {
 	var b strings.Builder
 	b.WriteString("Identity created\n")
 	if resp.GetFilePath() != "" {
@@ -88,7 +87,7 @@ func formatCreateIdentityText(resp *sophiapb.CreateIdentityResponse) string {
 	return strings.TrimSpace(b.String())
 }
 
-func formatShowIdentityText(resp *sophiapb.ShowIdentityResponse) string {
+func formatShowIdentityText(resp *opv1.ShowIdentityResponse) string {
 	var b strings.Builder
 	if resp.GetFilePath() != "" {
 		fmt.Fprintf(&b, "File: %s\n", resp.GetFilePath())
@@ -100,7 +99,7 @@ func formatShowIdentityText(resp *sophiapb.ShowIdentityResponse) string {
 	return strings.TrimSpace(b.String())
 }
 
-func formatListIdentitiesText(resp *sophiapb.ListIdentitiesResponse) string {
+func formatListIdentitiesText(resp *opv1.ListIdentitiesResponse) string {
 	if len(resp.GetEntries()) == 0 {
 		return "No identities found."
 	}
@@ -131,18 +130,19 @@ func formatDiscoverText(resp *opv1.DiscoverResponse) string {
 
 	if len(resp.GetEntries()) > 0 {
 		w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "UUID\tNAME\tCLADE\tSTATUS\tLANG\tORIGIN")
+		fmt.Fprintln(w, "UUID\tNAME\tCLADE\tSTATUS\tLANG\tORIGIN\tPATH")
 		for _, entry := range resp.GetEntries() {
 			id := entry.GetIdentity()
 			fmt.Fprintf(
 				w,
-				"%s\t%s\t%s\t%s\t%s\t%s\n",
+				"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				shortUUID(id.GetUuid()),
 				displayName(id),
 				cladeLabel(id.GetClade()),
 				statusLabel(id.GetStatus()),
 				defaultDash(id.GetLang()),
 				defaultDash(entry.GetOrigin()),
+				defaultDash(entry.GetRelativePath()),
 			)
 		}
 		_ = w.Flush()
@@ -164,7 +164,7 @@ func formatDiscoverText(resp *opv1.DiscoverResponse) string {
 	return strings.TrimSpace(b.String())
 }
 
-func appendIdentityTable(b *strings.Builder, id *sophiapb.HolonIdentity) {
+func appendIdentityTable(b *strings.Builder, id *opv1.HolonIdentity) {
 	if id == nil {
 		return
 	}
@@ -182,7 +182,7 @@ func appendIdentityTable(b *strings.Builder, id *sophiapb.HolonIdentity) {
 	_ = w.Flush()
 }
 
-func displayName(id *sophiapb.HolonIdentity) string {
+func displayName(id *opv1.HolonIdentity) string {
 	if id == nil {
 		return "-"
 	}
@@ -200,34 +200,34 @@ func displayName(id *sophiapb.HolonIdentity) string {
 	return strings.Join(parts, " ")
 }
 
-func cladeLabel(clade sophiapb.Clade) string {
+func cladeLabel(clade opv1.Clade) string {
 	switch clade {
-	case sophiapb.Clade_DETERMINISTIC_PURE:
+	case opv1.Clade_DETERMINISTIC_PURE:
 		return "deterministic/pure"
-	case sophiapb.Clade_DETERMINISTIC_STATEFUL:
+	case opv1.Clade_DETERMINISTIC_STATEFUL:
 		return "deterministic/stateful"
-	case sophiapb.Clade_DETERMINISTIC_IO_BOUND:
+	case opv1.Clade_DETERMINISTIC_IO_BOUND:
 		return "deterministic/io_bound"
-	case sophiapb.Clade_PROBABILISTIC_GENERATIVE:
+	case opv1.Clade_PROBABILISTIC_GENERATIVE:
 		return "probabilistic/generative"
-	case sophiapb.Clade_PROBABILISTIC_PERCEPTUAL:
+	case opv1.Clade_PROBABILISTIC_PERCEPTUAL:
 		return "probabilistic/perceptual"
-	case sophiapb.Clade_PROBABILISTIC_ADAPTIVE:
+	case opv1.Clade_PROBABILISTIC_ADAPTIVE:
 		return "probabilistic/adaptive"
 	default:
 		return "-"
 	}
 }
 
-func statusLabel(status sophiapb.Status) string {
+func statusLabel(status opv1.Status) string {
 	switch status {
-	case sophiapb.Status_DRAFT:
+	case opv1.Status_DRAFT:
 		return "draft"
-	case sophiapb.Status_STABLE:
+	case opv1.Status_STABLE:
 		return "stable"
-	case sophiapb.Status_DEPRECATED:
+	case opv1.Status_DEPRECATED:
 		return "deprecated"
-	case sophiapb.Status_DEAD:
+	case opv1.Status_DEAD:
 		return "dead"
 	default:
 		return "-"

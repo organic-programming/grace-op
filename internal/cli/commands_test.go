@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	opmod "github.com/organic-programming/grace-op/internal/mod"
-	"github.com/organic-programming/sophia-who/pkg/identity"
+	"github.com/organic-programming/grace-op/pkg/identity"
 )
 
 func TestVersionCommand(t *testing.T) {
