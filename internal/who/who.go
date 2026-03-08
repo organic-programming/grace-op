@@ -13,7 +13,7 @@ import (
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	openv "github.com/organic-programming/grace-op/internal/env"
 	"github.com/organic-programming/grace-op/internal/holons"
-	"github.com/organic-programming/grace-op/pkg/identity"
+	"github.com/organic-programming/grace-op/internal/identity"
 )
 
 // List returns local and cached identities, preserving their origin labels.

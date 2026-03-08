@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	mcppkg "github.com/organic-programming/grace-op/pkg/mcp"
+	mcppkg "github.com/organic-programming/grace-op/internal/mcp"
 )
 
 func cmdMCP(args []string, version string) int {

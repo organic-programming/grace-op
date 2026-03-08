@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/organic-programming/grace-op/pkg/identity"
+	"github.com/organic-programming/grace-op/internal/identity"
 )
 
 func writeManifestWithIdentity(t *testing.T, dir string, id identity.Identity, suffix string) {

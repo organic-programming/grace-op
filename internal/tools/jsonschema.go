@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	inspectpkg "github.com/organic-programming/grace-op/pkg/inspect"
+	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
 )
 
 // Definition is a normalized tool definition shared by op tools and op mcp.

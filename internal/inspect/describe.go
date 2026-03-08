@@ -1,6 +1,6 @@
 package inspect
 
-import holonmetav1 "github.com/organic-programming/grace-op/gen/go/holonmeta/v1"
+import holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
 
 // FromDescribeResponse normalizes a HolonMeta.Describe response into the
 // offline inspection document shape used by op inspect.

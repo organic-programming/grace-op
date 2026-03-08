@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	holonmetav1 "github.com/organic-programming/grace-op/gen/go/holonmeta/v1"
+	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
 	"google.golang.org/grpc"
 )
 

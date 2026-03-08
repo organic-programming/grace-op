@@ -11,8 +11,8 @@ import (
 	"time"
 
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
-	inspectpkg "github.com/organic-programming/grace-op/pkg/inspect"
-	toolspkg "github.com/organic-programming/grace-op/pkg/tools"
+	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
+	toolspkg "github.com/organic-programming/grace-op/internal/tools"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/dynamicpb"
 )

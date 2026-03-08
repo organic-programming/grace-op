@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	inspectpkg "github.com/organic-programming/grace-op/pkg/inspect"
+	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
 )
 
 func TestJSONSchemaForMethod(t *testing.T) {

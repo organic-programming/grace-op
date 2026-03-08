@@ -13,7 +13,7 @@ import (
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"github.com/organic-programming/grace-op/internal/holons"
 	"github.com/organic-programming/grace-op/internal/who"
-	"github.com/organic-programming/grace-op/pkg/identity"
+	"github.com/organic-programming/grace-op/internal/identity"
 
 	"google.golang.org/grpc"
 	grpcReflection "google.golang.org/grpc/reflection"

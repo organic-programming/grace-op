@@ -9,8 +9,8 @@ import (
 	"time"
 
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
-	holonmetav1 "github.com/organic-programming/grace-op/gen/go/holonmeta/v1"
-	inspectpkg "github.com/organic-programming/grace-op/pkg/inspect"
+	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
+	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
 )
 
 func cmdInspect(format Format, args []string) int {

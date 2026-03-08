@@ -14,7 +14,7 @@ import (
 	openv "github.com/organic-programming/grace-op/internal/env"
 	"github.com/organic-programming/grace-op/internal/modfile"
 	"github.com/organic-programming/grace-op/internal/progress"
-	"github.com/organic-programming/grace-op/pkg/identity"
+	"github.com/organic-programming/grace-op/internal/identity"
 )
 
 type Dependency struct {

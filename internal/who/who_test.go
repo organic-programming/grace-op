@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	openv "github.com/organic-programming/grace-op/internal/env"
-	"github.com/organic-programming/grace-op/pkg/identity"
+	"github.com/organic-programming/grace-op/internal/identity"
 )
 
 func TestCreateFromJSONWritesGeneratedByOp(t *testing.T) {

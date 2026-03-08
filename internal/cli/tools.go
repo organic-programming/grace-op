@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	inspectpkg "github.com/organic-programming/grace-op/pkg/inspect"
-	toolspkg "github.com/organic-programming/grace-op/pkg/tools"
+	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
+	toolspkg "github.com/organic-programming/grace-op/internal/tools"
 )
 
 func cmdTools(_ Format, args []string) int {
