@@ -56,15 +56,16 @@ Language tools and platform tools remain the actual builders.
 ## CLI Contract
 
 ```text
-op build [<holon-or-path>] [--target <target>] [--mode <mode>] [--dry-run]
+op build [<holon-or-path>] [--target <target>] [--mode <mode>] [--config <config>] [--dry-run]
 ```
 
 Rules:
 
 - `<holon-or-path>` defaults to `.`
 - `--target` selects the platform recipe or runner target
-- `--mode` defaults to `debug`
-- `--dry-run` prints the resolved build plan without executing it
+- `--mode` defaults to `debug` (also: `release`, `profile`).
+- `--config` selects a named build configuration from `build.configs`. Defaults to `build.default_config`.
+- `--dry-run` prints the resolved build plan without executing it.
 - `op build` does not run tests
 - `op test` remains a separate command
 
@@ -127,6 +128,7 @@ Additional `op build` fields:
 
 - `build_target`
 - `build_mode`
+- `build_config`
 - `artifact`
 - `children` (for composite builds)
 
@@ -170,9 +172,8 @@ artifact".
 
 Proposed rule:
 
-- `artifacts.binary` remains valid for simple single-binary holons
-- `artifacts.primary` is introduced for runners whose final deliverable
-  is not just a CLI binary
+- `artifacts.primary` is introduced for non-CLI deliverables (e.g., .app bundles).
+- `artifacts.binary` remains for single-binary holons.
 - if `artifacts.primary` is set, it is the success contract for
   `op build`
 - otherwise `artifacts.binary` is the success contract
@@ -182,6 +183,41 @@ Examples:
 - `sophia-who`: `artifacts.binary: .op/build/bin/sophia-who`
 - `wisupaa-whisper`: `artifacts.binary: wisupaa-whisper`
 - `Gudule Greeting Godart`: `artifacts.primary: greeting-godart/build/macos/.../gudule-greeting-godart.app`
+
+### 4. Build Configs
+
+Named build configurations allow holons to express build-time
+variants (license modes, feature sets, linkage strategies) without
+exposing runner-specific flags in the manifest.
+
+`op` owns the **envelope**: config names, selection (`--config`),
+defaults (`default_config`), and propagation to child builds.
+It passes the selected config name to the runner as `OP_CONFIG`.
+The holon's build system decides what the name means.
+
+```yaml
+build:
+  runner: cmake
+  configs:
+    lgpl:
+      description: "LGPL-safe build, no GPL codecs"
+    gpl:
+      description: "Full GPL build with x264/x265"
+  default_config: lgpl
+```
+
+Runner injection:
+- `cmake`: `-DOP_CONFIG=<config>` define during configure
+- `go-module`: `OP_CONFIG` environment variable during build/test
+- `recipe`: propagates `--config` to `build_member` children
+
+The `recipe` runner propagates `--config` to child holon builds:
+
+```yaml
+steps:
+  - build_member: daemon
+    config: gpl              # override the child's default config
+```
 
 ## Recipe Runner
 
