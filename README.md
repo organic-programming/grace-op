@@ -72,9 +72,31 @@ op grpc+unix:///tmp/who.sock ListIdentities '{}'
 op grpc+stdio://sophia-who ListIdentities '{}'
 ```
 
+## Shell Completion
+
+`op` supports tab-completion for **zsh** and **bash**.
+
+```bash
+# zsh — add to ~/.zshrc
+eval "$(op completion zsh)"
+
+# bash — add to ~/.bashrc
+eval "$(op completion bash)"
+```
+
+Then restart your shell. Completions use the existing discovery
+mechanism — identity-derived slugs, OPBIN entries, and PATH binaries
+are all suggested:
+
+```
+op run gudule-<TAB>       →  gudule-greeting-godart, gudule-greeting-goswift, ...
+op build sophia<TAB>      →  sophia-who
+op uninstall <TAB>        →  only installed holons from $OPBIN
+```
+
 ## Status
 
-v0.1.0 — native identity commands, dependency commands, discover, namespace dispatch.
+v0.2.1 — identity slugs, shell completion, discover SLUG column, commit in version.
 
 ## Design Drafts
 
