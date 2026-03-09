@@ -416,7 +416,13 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
 	}
-	printer.Step("launching " + holonName + "...")
+	isApp := target.Manifest.Manifest.Kind == holons.KindComposite &&
+		isMacAppBundle(target.Manifest.ArtifactPath(ctx))
+	if isApp {
+		printer.Step(holonName + " running — Cmd+Q to quit")
+	} else {
+		printer.Step("launching " + holonName + "...")
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -847,7 +853,8 @@ func commandForArtifact(manifest *holons.LoadedManifest, ctx holons.BuildContext
 		}
 		if info.IsDir() {
 			if isMacAppBundle(artifactPath) && runtime.GOOS == "darwin" {
-				return exec.Command("open", "-W", artifactPath), nil
+				// -W waits for the app to quit, -n opens a new instance
+				return exec.Command("open", "-W", "-n", artifactPath), nil
 			}
 			return nil, fmt.Errorf("artifact is not directly launchable: %s", artifactPath)
 		}
