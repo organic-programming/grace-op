@@ -139,6 +139,16 @@ type LoadedManifest struct {
 	Name     string
 }
 
+func (m *Manifest) ArtifactPath() string {
+	if m == nil {
+		return ""
+	}
+	if primary := strings.TrimSpace(m.Artifacts.Primary); primary != "" {
+		return primary
+	}
+	return strings.TrimSpace(m.Artifacts.Binary)
+}
+
 func LoadManifest(dir string) (*LoadedManifest, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -218,9 +228,9 @@ func (m *LoadedManifest) BinaryName() string {
 	return strings.TrimSpace(filepath.Base(trimmed))
 }
 
-// PrimaryArtifactPath returns the primary artifact path (success contract).
-// Target-aware artifacts take precedence over artifacts.primary, then artifacts.binary.
-func (m *LoadedManifest) PrimaryArtifactPath(ctx BuildContext) string {
+// ArtifactPath returns the resolved launch/build artifact for the requested target.
+// Target-aware primary artifacts take precedence over artifacts.primary, then artifacts.binary.
+func (m *LoadedManifest) ArtifactPath(ctx BuildContext) string {
 	if isAggregateBuildTarget(ctx.Target) {
 		return ""
 	}
@@ -229,10 +239,15 @@ func (m *LoadedManifest) PrimaryArtifactPath(ctx BuildContext) string {
 			return m.mustResolveManifestPath(p)
 		}
 	}
-	if p := strings.TrimSpace(m.Manifest.Artifacts.Primary); p != "" {
-		return m.mustResolveManifestPath(p)
+	if strings.TrimSpace(m.Manifest.Artifacts.Primary) != "" {
+		return m.mustResolveManifestPath(m.Manifest.ArtifactPath())
 	}
 	return m.BinaryPath()
+}
+
+// PrimaryArtifactPath returns the primary artifact path (success contract).
+func (m *LoadedManifest) PrimaryArtifactPath(ctx BuildContext) string {
+	return m.ArtifactPath(ctx)
 }
 
 func (m *LoadedManifest) OpRoot() string {

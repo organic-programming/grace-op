@@ -4,11 +4,15 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -102,8 +106,8 @@ Direct gRPC URI dispatch:
   op grpc+unix://<path> <method>         gRPC over Unix socket
   op grpc+ws://<host:port> <method>      gRPC over WebSocket
   op grpc+wss://<host:port> <method>     gRPC over secure WebSocket
-  op run <holon>:<port>                  start a holon's gRPC server (TCP)
-  op run <holon> --listen <URI>          start with any transport
+  op run <holon> [flags]                 build if needed, then launch in foreground
+  op run <holon>:<port>                  shorthand for --listen tcp://:<port>
 
 OP commands:
   op list [root]                         list local + cached holons natively
@@ -125,6 +129,13 @@ Build flags:
   --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
   --mode <debug|release|profile>               build mode (default: debug)
   --dry-run                                    print resolved plan, do not execute
+
+Run flags:
+  --listen <URI>                               listen address for service holons (default: stdio://)
+  --no-build                                   fail if the artifact is missing instead of building
+  --target <...>                               pass build target through if a build is needed
+  --mode <debug|release|profile>               pass build mode through if a build is needed
+
   op discover                            list available holons
   op serve [--listen tcp://:9090]        start OP's own gRPC server
   op version                             show op version
@@ -267,67 +278,146 @@ func cmdServe(args []string) int {
 	return 0
 }
 
-// cmdRun starts a holon's gRPC server as a background process.
-// Usage: op run <holon>:<port>  or  op run <holon> --listen <URI>
+type runOptions struct {
+	ListenURI      string
+	ListenExplicit bool
+	NoBuild        bool
+	Target         string
+	Mode           string
+}
+
+// cmdRun builds a holon artifact if needed, then launches it in the foreground.
 func cmdRun(format Format, globalQuiet bool, args []string) int {
 	ui, args, _ := extractQuietFlag(args)
 	quiet := globalQuiet || ui.Quiet
 
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "op run: requires <holon>:<port> or <holon> --listen <URI>")
+	holonName, opts, err := parseRunArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
 	}
 	printer := commandProgress(format, quiet)
 
-	// Check for --listen form first
-	listenURI := flagValue(args, "--listen")
-	var holonName string
+	printer.Step("resolving " + holonName + "...")
 
-	if listenURI != "" {
-		// op run <holon> --listen <URI>
-		holonName = args[0]
-	} else {
-		// op run <holon>:<port>  (shorthand for tcp)
-		holonPort := args[0]
-		parts := strings.SplitN(holonPort, ":", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			fmt.Fprintln(os.Stderr, "op run: format is <holon>:<port> or <holon> --listen <URI>")
+	if binary := resolveInstalledBinary(holonName); binary != "" {
+		printer.Step("launching " + holonName + "...")
+		cmd := exec.Command(binary, "serve", "--listen", opts.ListenURI)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := runForeground(cmd); err != nil {
+			if code, ok := commandExitCode(err); ok {
+				return code
+			}
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 			return 1
 		}
-		holonName = parts[0]
-		listenURI = "tcp://:" + parts[1]
+		printer.Done(fmt.Sprintf("%s exited in %s", holonName, humanElapsed(printer)), nil)
+		return 0
 	}
 
-	printer.Step("resolving " + holonName + "...")
-	binary, err := resolveHolon(holonName)
+	target, err := holons.ResolveTarget(holonName)
 	if err != nil {
-		printer.Done("run failed", err)
-		fmt.Fprintf(os.Stderr, "op run: holon %q not found\n", holonName)
-		return 1
-	}
-
-	// Launch: <binary> serve --listen <URI>
-	printer.Step("launching server...")
-	cmd := exec.Command(binary, "serve", "--listen", listenURI)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
 		printer.Done("run failed", err)
 		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
 	}
-	printer.Step("waiting for readiness...")
-
-	fmt.Printf("op run: started %s (pid %d) on %s\n", holonName, cmd.Process.Pid, listenURI)
-	fmt.Printf("op run: stop the process by PID %d using your platform's process tool\n", cmd.Process.Pid)
-
-	// Detach — the process runs in the background
-	if err := cmd.Process.Release(); err != nil {
-		fmt.Fprintf(os.Stderr, "op run: warning: could not detach process: %v\n", err)
+	if target.ManifestErr != nil {
+		printer.Done("run failed", target.ManifestErr)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", target.ManifestErr)
+		return 1
 	}
-	printer.Done(fmt.Sprintf("server ready for %s in %s", holonName, humanElapsed(printer)), nil)
+	if target.Manifest == nil {
+		err := fmt.Errorf("no %s found in %s", holons.ManifestFileName, target.RelativePath)
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
 
+	ctx, err := holons.ResolveBuildContext(target.Manifest, holons.BuildOptions{
+		Target: opts.Target,
+		Mode:   opts.Mode,
+	})
+	if err != nil {
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+	if ctx.Target == "all" {
+		err := fmt.Errorf("target %q cannot be launched", ctx.Target)
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+
+	isComposite := target.Manifest.Manifest.Kind == holons.KindComposite
+	if isComposite && opts.ListenExplicit {
+		err := fmt.Errorf("--listen is only supported for service holons")
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+
+	artifactPath := target.Manifest.ArtifactPath(ctx)
+	if artifactPath == "" {
+		err := fmt.Errorf("no artifact declared for target %q mode %q", ctx.Target, ctx.Mode)
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+	if _, err := os.Stat(artifactPath); err != nil {
+		if !os.IsNotExist(err) {
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
+		if opts.NoBuild {
+			err := fmt.Errorf("artifact missing: %s", artifactPath)
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
+		printer.Step("building " + holonName + "...")
+		if _, err := holons.ExecuteLifecycle(holons.OperationBuild, holonName, holons.BuildOptions{
+			Target:   opts.Target,
+			Mode:     opts.Mode,
+			Progress: printer,
+		}); err != nil {
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
+		if _, err := os.Stat(artifactPath); err != nil {
+			if os.IsNotExist(err) {
+				err = fmt.Errorf("artifact missing: %s", artifactPath)
+			}
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
+	}
+
+	cmd, err := commandForArtifact(target.Manifest, ctx, opts.ListenURI)
+	if err != nil {
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+	printer.Step("launching " + holonName + "...")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := runForeground(cmd); err != nil {
+		if code, ok := commandExitCode(err); ok {
+			return code
+		}
+		printer.Done("run failed", err)
+		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+		return 1
+	}
+	printer.Done(fmt.Sprintf("%s exited in %s", holonName, humanElapsed(printer)), nil)
 	return 0
 }
 
@@ -655,6 +745,154 @@ func cmdDispatch(holon string, args []string) int {
 // resolveHolon finds a holon binary by selector.
 func resolveHolon(name string) (string, error) {
 	return holons.ResolveBinary(name)
+}
+
+func resolveInstalledBinary(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || strings.ContainsAny(trimmed, `/\`) {
+		return ""
+	}
+	return holons.ResolveInstalledBinary(trimmed)
+}
+
+func parseRunArgs(args []string) (string, runOptions, error) {
+	opts := runOptions{ListenURI: "stdio://"}
+	var positional []string
+
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--listen":
+			if i+1 >= len(args) {
+				return "", opts, fmt.Errorf("--listen requires a value")
+			}
+			opts.ListenURI = args[i+1]
+			opts.ListenExplicit = true
+			i++
+		case args[i] == "--no-build":
+			opts.NoBuild = true
+		case args[i] == "--target":
+			if i+1 >= len(args) {
+				return "", opts, fmt.Errorf("--target requires a value")
+			}
+			opts.Target = args[i+1]
+			i++
+		case args[i] == "--mode":
+			if i+1 >= len(args) {
+				return "", opts, fmt.Errorf("--mode requires a value")
+			}
+			opts.Mode = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--"):
+			return "", opts, fmt.Errorf("unknown flag %q", args[i])
+		default:
+			positional = append(positional, args[i])
+		}
+	}
+
+	if len(positional) == 0 {
+		return "", opts, fmt.Errorf("requires <holon> [flags]")
+	}
+	if len(positional) > 1 {
+		return "", opts, fmt.Errorf("accepts exactly one <holon>")
+	}
+
+	holonName := strings.TrimSpace(positional[0])
+	if legacyName, legacyListen, ok := parseLegacyRunTarget(holonName); ok {
+		if opts.ListenExplicit {
+			return "", opts, fmt.Errorf("cannot combine --listen with <holon>:<port> shorthand")
+		}
+		holonName = legacyName
+		opts.ListenURI = legacyListen
+		opts.ListenExplicit = true
+	}
+	if holonName == "" {
+		return "", opts, fmt.Errorf("requires <holon> [flags]")
+	}
+
+	return holonName, opts, nil
+}
+
+func parseLegacyRunTarget(value string) (string, string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.ContainsAny(trimmed, `/\`) {
+		return "", "", false
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return strings.TrimSpace(parts[0]), "tcp://:" + strings.TrimSpace(parts[1]), true
+}
+
+func commandForArtifact(manifest *holons.LoadedManifest, ctx holons.BuildContext, listenURI string) (*exec.Cmd, error) {
+	if manifest == nil {
+		return nil, fmt.Errorf("manifest required")
+	}
+	if manifest.Manifest.Kind == holons.KindComposite {
+		artifactPath := manifest.ArtifactPath(ctx)
+		info, err := os.Stat(artifactPath)
+		if err != nil {
+			return nil, err
+		}
+		if info.IsDir() {
+			if isMacAppBundle(artifactPath) && runtime.GOOS == "darwin" {
+				return exec.Command("open", "-W", artifactPath), nil
+			}
+			return nil, fmt.Errorf("artifact is not directly launchable: %s", artifactPath)
+		}
+		return exec.Command(artifactPath), nil
+	}
+
+	binaryPath := manifest.BinaryPath()
+	if strings.TrimSpace(binaryPath) == "" {
+		return nil, fmt.Errorf("no binary declared for %s", manifest.Name)
+	}
+	return exec.Command(binaryPath, "serve", "--listen", listenURI), nil
+}
+
+func isMacAppBundle(path string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(path)), ".app")
+}
+
+func runForeground(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	signals := []os.Signal{os.Interrupt}
+	if runtime.GOOS != "windows" {
+		signals = append(signals, syscall.SIGTERM)
+	}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, signals...)
+	defer signal.Stop(sigCh)
+
+	for {
+		select {
+		case err := <-waitCh:
+			return err
+		case sig := <-sigCh:
+			if cmd.Process != nil {
+				_ = cmd.Process.Signal(sig)
+			}
+		}
+	}
+}
+
+func commandExitCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), true
+	}
+	return 0, false
 }
 
 // --- Flag helpers ---

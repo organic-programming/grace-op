@@ -8,11 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	opmod "github.com/organic-programming/grace-op/internal/mod"
 	"github.com/organic-programming/grace-op/internal/identity"
+	opmod "github.com/organic-programming/grace-op/internal/mod"
 )
 
 func TestVersionCommand(t *testing.T) {
@@ -1153,37 +1154,180 @@ func TestDispatchUnknownHolon(t *testing.T) {
 	}
 }
 
-func TestRunCommandUsesPlatformNeutralStopMessage(t *testing.T) {
+func TestRunCommandBuildsAndRunsService(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
 	root := t.TempDir()
 	chdirForTest(t, root)
 
 	dir := filepath.Join(root, "demo")
-	if err := os.MkdirAll(filepath.Join(dir, ".op", "build", "bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte("schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nartifacts:\n  binary: demo\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	binaryPath := filepath.Join(dir, ".op", "build", "bin", "demo")
-	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeRunServiceFixture(t, dir, "demo")
 
-	output := captureStdout(t, func() {
-		code := Run([]string{"run", "demo:9099"}, "0.1.0-test")
+	stdout, stderr := captureOutput(t, func() {
+		code := Run([]string{"run", "demo", "--listen", "tcp://127.0.0.1:9099"}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("run returned %d, want 0", code)
 		}
 	})
 
-	if !strings.Contains(output, "op run: started demo") {
-		t.Fatalf("run output missing start line: %q", output)
+	if !strings.Contains(stdout, "serve --listen tcp://127.0.0.1:9099") {
+		t.Fatalf("run output missing serve args: %q", stdout)
 	}
-	if !strings.Contains(output, "stop the process by PID") {
-		t.Fatalf("run output missing neutral stop guidance: %q", output)
+	if !strings.Contains(stderr, "go build -o") {
+		t.Fatalf("run stderr missing build step: %q", stderr)
 	}
-	if strings.Contains(output, "kill ") {
-		t.Fatalf("run output still contains platform-specific kill guidance: %q", output)
+	if _, err := os.Stat(filepath.Join(dir, ".op", "build", "bin", "demo")); err != nil {
+		t.Fatalf("built artifact missing after run: %v", err)
+	}
+}
+
+func TestRunCommandRunsCompositePrimaryArtifact(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	dir := filepath.Join(root, "demo")
+	appDir := filepath.Join(dir, "app")
+	if err := os.MkdirAll(filepath.Join(appDir, "cmd", "runapp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte("module example.com/runapp\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "cmd", "runapp", "main.go"), []byte(runEchoMainSource("composite launched")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := runtimeTargetForRunTest()
+	artifact := "app/run-app" + executableSuffixForRunTest()
+	manifest := fmt.Sprintf(
+		"schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  defaults:\n    target: %s\n    mode: debug\n  members:\n    - id: app\n      path: app\n      type: component\n  targets:\n    %s:\n      steps:\n        - exec:\n            cwd: app\n            argv: [\"go\", \"build\", \"-o\", \"run-app%s\", \"./cmd/runapp\"]\n        - assert_file:\n            path: %s\nrequires:\n  commands: [go]\n  files: [app/go.mod]\nartifacts:\n  primary_by_target:\n    %s:\n      debug: %s\n",
+		target,
+		target,
+		executableSuffixForRunTest(),
+		artifact,
+		target,
+		artifact,
+	)
+	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		code := Run([]string{"run", "demo"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("run returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(stdout, "composite launched") {
+		t.Fatalf("run output missing composite launch: %q", stdout)
+	}
+	if !strings.Contains(stderr, "go build -o") {
+		t.Fatalf("run stderr missing recipe build step: %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(artifact))); err != nil {
+		t.Fatalf("composite artifact missing after run: %v", err)
+	}
+}
+
+func TestRunCommandSkipsBuildWhenArtifactAlreadyExists(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	dir := filepath.Join(root, "demo")
+	writeRunServiceFixture(t, dir, "demo")
+	buildRunBinary(t, dir, filepath.Join(dir, ".op", "build", "bin", "demo"), "./cmd/demo")
+	if err := os.Remove(filepath.Join(dir, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		code := Run([]string{"run", "demo"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("run returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(stdout, "serve --listen stdio://") {
+		t.Fatalf("run output missing default stdio listen: %q", stdout)
+	}
+	if strings.Contains(stderr, "go build -o") {
+		t.Fatalf("run unexpectedly rebuilt artifact: %q", stderr)
+	}
+}
+
+func TestRunCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	dir := filepath.Join(root, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte("schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr := captureStderr(t, func() {
+		code := Run([]string{"run", "--no-build", "demo"}, "0.1.0-test")
+		if code != 1 {
+			t.Fatalf("run returned %d, want 1", code)
+		}
+	})
+
+	if !strings.Contains(stderr, "artifact missing") {
+		t.Fatalf("stderr missing artifact error: %q", stderr)
+	}
+}
+
+func TestRunCommandUsesInstalledBinaryWithoutSource(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	runtimeHome := filepath.Join(root, "runtime")
+	opbin := filepath.Join(runtimeHome, "bin")
+	t.Setenv("OPPATH", runtimeHome)
+	t.Setenv("OPBIN", opbin)
+	t.Setenv("PATH", opbin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.MkdirAll(opbin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srcDir := filepath.Join(root, "installed-src")
+	if err := os.MkdirAll(filepath.Join(srcDir, "cmd", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "go.mod"), []byte("module example.com/installed\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "cmd", "demo", "main.go"), []byte(runEchoMainSource("installed")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buildRunBinary(t, srcDir, filepath.Join(opbin, "demo"+executableSuffixForRunTest()), "./cmd/demo")
+
+	stdout := captureStdout(t, func() {
+		code := Run([]string{"run", "demo:9097"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("run returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(stdout, "serve --listen tcp://:9097") {
+		t.Fatalf("run output missing shorthand listen: %q", stdout)
 	}
 }
 
@@ -1416,4 +1560,67 @@ func captureOutput(t *testing.T, fn func()) (string, string) {
 		t.Fatalf("read captured stderr: %v", err)
 	}
 	return stdoutBuf.String(), stderrBuf.String()
+}
+
+func writeRunServiceFixture(t *testing.T, dir, name string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/"+name+"\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", name, "main.go"), []byte(runEchoMainSource(name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte(fmt.Sprintf("schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: %s\n", name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func buildRunBinary(t *testing.T, dir, output, pkg string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-o", output, pkg)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+}
+
+func runEchoMainSource(label string) string {
+	return fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() {
+	fmt.Println(%q, strings.Join(os.Args[1:], " "))
+}
+`, label)
+}
+
+func runtimeTargetForRunTest() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macos"
+	case "windows":
+		return "windows"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func executableSuffixForRunTest() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }

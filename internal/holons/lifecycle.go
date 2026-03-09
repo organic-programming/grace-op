@@ -141,8 +141,12 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 	return report, err
 }
 
+func ResolveBuildContext(manifest *LoadedManifest, opts BuildOptions) (BuildContext, error) {
+	return resolveBuildContext(manifest, opts)
+}
+
 func resolveArtifact(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
-	artifactPath := manifest.PrimaryArtifactPath(ctx)
+	artifactPath := manifest.ArtifactPath(ctx)
 	if artifactPath == "" {
 		return fmt.Errorf("no artifact declared for target %q mode %q", ctx.Target, ctx.Mode)
 	}
@@ -152,7 +156,7 @@ func resolveArtifact(manifest *LoadedManifest, ctx BuildContext, report *Report)
 
 // verifyArtifact checks the primary artifact exists after build (success contract).
 func verifyArtifact(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
-	artifactPath := manifest.PrimaryArtifactPath(ctx)
+	artifactPath := manifest.ArtifactPath(ctx)
 	if artifactPath == "" {
 		return fmt.Errorf("no artifact declared for target %q mode %q", ctx.Target, ctx.Mode)
 	}
@@ -186,7 +190,7 @@ func baseReport(op Operation, target *Target, ctx BuildContext) Report {
 			report.Binary = workspaceRelativePath(binaryPath)
 		}
 		if op == OperationBuild {
-			if artifactPath := target.Manifest.PrimaryArtifactPath(ctx); artifactPath != "" {
+			if artifactPath := target.Manifest.ArtifactPath(ctx); artifactPath != "" {
 				report.Artifact = workspaceRelativePath(artifactPath)
 			}
 		}

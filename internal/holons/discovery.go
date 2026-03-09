@@ -269,6 +269,14 @@ func ResolveBinary(name string) (string, error) {
 	return "", fmt.Errorf("holon %q not found", name)
 }
 
+func ResolveInstalledBinary(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	return lookupBinaryOnSystem(trimmed)
+}
+
 func resolveTargetBySlug(ref string) (*Target, error) {
 	return resolveTargetBySlugFromOrigins(ref, true, true)
 }

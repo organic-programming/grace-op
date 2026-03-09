@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/organic-programming/go-holons/pkg/transport"
 	echov1 "github.com/organic-programming/grace-op/internal/cli/testsupport/echoholon/protos/echo/v1"
 	"google.golang.org/grpc"
 )
@@ -45,7 +46,7 @@ func main() {
 	listen := flag.String("listen", defaultListenURI, "tcp URI to listen on")
 	flag.Parse()
 
-	listener, publicURI, err := listenTCP(*listen)
+	listener, err := transport.Listen(*listen)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listen failed: %v\n", err)
 		os.Exit(1)
@@ -60,7 +61,9 @@ func main() {
 		serveErrCh <- grpcServer.Serve(listener)
 	}()
 
-	fmt.Println(publicURI)
+	if !isStdioURI(*listen) {
+		fmt.Println(publicURI(*listen, listener.Addr()))
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -83,27 +86,41 @@ func main() {
 	}
 }
 
-func listenTCP(uri string) (net.Listener, string, error) {
-	if !strings.HasPrefix(uri, "tcp://") {
-		return nil, "", fmt.Errorf("unsupported listen URI %q", uri)
+func publicURI(listenURI string, addr net.Addr) string {
+	if addr == nil {
+		return listenURI
 	}
 
-	address := strings.TrimPrefix(uri, "tcp://")
-	listener, err := net.Listen("tcp", address)
+	raw := strings.TrimSpace(addr.String())
+	if raw == "" {
+		return listenURI
+	}
+	if strings.Contains(raw, "://") {
+		return raw
+	}
+
+	if strings.HasPrefix(listenURI, "tcp://") {
+		host := extractTCPHost(listenURI)
+		if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+			host = "127.0.0.1"
+		}
+		_, port, err := net.SplitHostPort(addr.String())
+		if err != nil {
+			return fmt.Sprintf("tcp://%s", addr.String())
+		}
+		return fmt.Sprintf("tcp://%s:%s", host, port)
+	}
+
+	return listenURI
+}
+
+func extractTCPHost(uri string) string {
+	rest := strings.TrimPrefix(uri, "tcp://")
+	host, _, err := net.SplitHostPort(rest)
 	if err != nil {
-		return nil, "", err
+		return ""
 	}
-
-	host, _, err := net.SplitHostPort(address)
-	if err != nil || host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
-		host = "127.0.0.1"
-	}
-	_, port, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		return nil, "", err
-	}
-
-	return listener, fmt.Sprintf("tcp://%s:%s", host, port), nil
+	return host
 }
 
 func shutdown(server *grpc.Server) {
@@ -118,4 +135,8 @@ func shutdown(server *grpc.Server) {
 	case <-time.After(2 * time.Second):
 		server.Stop()
 	}
+}
+
+func isStdioURI(uri string) bool {
+	return strings.TrimSpace(uri) == "stdio://"
 }
