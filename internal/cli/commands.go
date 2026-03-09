@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -146,6 +147,7 @@ Run flags:
 // --- OP's own commands ---
 
 type discoverEntry struct {
+	Slug         string `json:"slug"`
 	UUID         string `json:"uuid"`
 	GivenName    string `json:"given_name"`
 	FamilyName   string `json:"family_name"`
@@ -177,6 +179,7 @@ func cmdDiscover(format Format) int {
 	entries := make([]discoverEntry, 0, len(located)+len(cached))
 	for _, h := range append(append([]holons.LocalHolon{}, located...), cached...) {
 		entries = append(entries, discoverEntry{
+			Slug:         filepath.Base(h.Dir),
 			UUID:         h.Identity.UUID,
 			GivenName:    h.Identity.GivenName,
 			FamilyName:   h.Identity.FamilyName,
@@ -214,17 +217,17 @@ func printDiscoverTable(entries []discoverEntry, installedHolons, pathHolons []s
 		fmt.Println("No holons found in known roots.")
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tLANG\tCLADE\tSTATUS\tORIGIN\tREL_PATH\tUUID")
+		fmt.Fprintln(w, "SLUG\tNAME\tLANG\tCLADE\tSTATUS\tORIGIN\tUUID")
 		for _, entry := range entries {
 			fmt.Fprintf(
 				w,
 				"%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				defaultDash(entry.Slug),
 				discoverDisplayName(entry),
 				defaultDash(entry.Lang),
 				defaultDash(entry.Clade),
 				defaultDash(entry.Status),
 				defaultDash(entry.Origin),
-				defaultDash(entry.RelativePath),
 				defaultDash(entry.UUID),
 			)
 		}
