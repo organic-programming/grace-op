@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	version = "0.2.2"
+	version = "0.2.3"
 	commit  = "unknown" // set via: -ldflags "-X main.commit=..."
 )
 

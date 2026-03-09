@@ -853,8 +853,8 @@ func commandForArtifact(manifest *holons.LoadedManifest, ctx holons.BuildContext
 		}
 		if info.IsDir() {
 			if isMacAppBundle(artifactPath) && runtime.GOOS == "darwin" {
-				// -W waits for the app to quit, -n opens a new instance
-				return exec.Command("open", "-W", "-n", artifactPath), nil
+				// -W waits for the app to quit
+				return exec.Command("open", "-W", artifactPath), nil
 			}
 			return nil, fmt.Errorf("artifact is not directly launchable: %s", artifactPath)
 		}
