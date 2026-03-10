@@ -9,21 +9,61 @@ commands to them through a single interface.
 ## Install
 
 ```bash
-go install github.com/organic-programming/grace-op/cmd/op@latest
+GOBIN="$OPBIN" go install github.com/organic-programming/grace-op/cmd/op@latest
 ```
 
 The binary is installed as `op` (not `grace-op`) because the Go module
-entry point is `cmd/op`. Make sure `$(go env GOPATH)/bin` is in your
-`PATH`.
+entry point is `cmd/op`.
 
 ### From Source
 
 ```bash
 git clone https://github.com/organic-programming/grace-op.git
 cd grace-op
-go build -o op ./cmd/op
-sudo mv op /usr/local/bin/   # or anywhere in your PATH
+go build -o op ./cmd/op && mv op "$OPBIN/"
 ```
+
+## Environment Setup
+
+OP stores its runtime data under `$OPPATH` (defaults to `~/.op`) and
+installs binaries into `$OPBIN` (defaults to `$OPPATH/bin`).
+
+### macOS / Linux
+
+```bash
+# Create the directories
+op env --init
+
+# Append the shell snippet to your profile
+op env --shell >> ~/.zshrc   # or ~/.bashrc
+source ~/.zshrc
+```
+
+`op env --shell` outputs:
+
+```bash
+export OPPATH="${OPPATH:-$HOME/.op}"
+export OPBIN="${OPBIN:-$OPPATH/bin}"
+mkdir -p "$OPBIN"
+export PATH="$OPBIN:$PATH"
+```
+
+### Windows
+
+```powershell
+# Create the directories
+op env --init
+
+# Set environment variables (persistent, user-level)
+[System.Environment]::SetEnvironmentVariable("OPPATH", "$env:USERPROFILE\.op", "User")
+[System.Environment]::SetEnvironmentVariable("OPBIN", "$env:USERPROFILE\.op\bin", "User")
+
+# Add OPBIN to PATH
+$path = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+[System.Environment]::SetEnvironmentVariable("PATH", "$env:USERPROFILE\.op\bin;$path", "User")
+```
+
+Restart your terminal after running these commands.
 
 ## Usage
 
