@@ -155,7 +155,7 @@ op uninstall <TAB>        →  only installed holons from $OPBIN
 
 ## Status
 
-v0.3.0-dev — composite artifacts, expanded runners, template scaffolds, and release packaging.
+v0.3.1 — composite artifacts, expanded runners, template scaffolds, and release packaging.
 
 ## Design Drafts
 
