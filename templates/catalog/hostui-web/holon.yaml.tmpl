@@ -1,0 +1,40 @@
+schema: holon/v0
+uuid: "{{ .UUID }}"
+given_name: "{{ .GivenName }}"
+family_name: "{{ .FamilyName }}"
+motto: "{{ .GivenTitle }} {{ .FamilyTitle }} host UI."
+composer: op
+clade: deterministic/io_bound
+status: draft
+born: "{{ .Date }}"
+parents: []
+reproduction: assisted
+generated_by: op
+lang: web
+description: Recipe-backed web host UI scaffold.
+kind: composite
+build:
+  runner: recipe
+  defaults:
+    target: macos
+    mode: debug
+  members:
+    - id: app
+      path: app
+      type: component
+  targets:
+    macos:
+      steps:
+        - exec:
+            cwd: app
+            argv: ["npm", "install"]
+        - exec:
+            cwd: app
+            argv: ["npm", "run", "build"]
+        - assert_file:
+            path: app/dist/index.html
+requires:
+  commands: [npm]
+  files: [app/package.json]
+artifacts:
+  primary: app/dist/index.html

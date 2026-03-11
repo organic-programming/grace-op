@@ -464,8 +464,7 @@ func binaryLookupNames(target *Target, requested string) []string {
 
 func lookupBinaryOnSystem(names ...string) string {
 	for _, candidate := range uniqueNonEmpty(names) {
-		installed := filepath.Join(openv.OPBIN(), candidate)
-		if info, statErr := os.Stat(installed); statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+		if installed := lookupInstalledArtifactInOPBIN(candidate); installed != "" {
 			return installed
 		}
 		if path, lookErr := exec.LookPath(candidate); lookErr == nil {
@@ -526,18 +525,21 @@ func DiscoverInOPBIN() []string {
 
 	found := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
 		info, err := entry.Info()
-		if err != nil || info.IsDir() {
+		if err != nil {
 			continue
 		}
-		if info.Mode()&0o111 == 0 {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp") {
 			continue
 		}
-		path := filepath.Join(opbin, entry.Name())
-		found = append(found, fmt.Sprintf("%s -> %s", entry.Name(), path))
+		if info.IsDir() && !isMacAppBundlePath(name) {
+			path := filepath.Join(opbin, name)
+			found = append(found, fmt.Sprintf("%s -> %s", name, path))
+			continue
+		}
+		path := filepath.Join(opbin, name)
+		found = append(found, fmt.Sprintf("%s -> %s", name, path))
 	}
 	sort.Strings(found)
 	return found

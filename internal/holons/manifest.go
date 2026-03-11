@@ -18,6 +18,13 @@ const (
 	KindComposite    = "composite"
 	RunnerGoModule   = "go-module"
 	RunnerCMake      = "cmake"
+	RunnerCargo      = "cargo"
+	RunnerSwiftPkg   = "swift-package"
+	RunnerFlutter    = "flutter"
+	RunnerNPM        = "npm"
+	RunnerGradle     = "gradle"
+	RunnerDotnet     = "dotnet"
+	RunnerQtCMake    = "qt-cmake"
 	RunnerRecipe     = "recipe"
 	ManifestFileName = "holon.yaml"
 )
@@ -127,9 +134,8 @@ type Delegates struct {
 }
 
 type ArtifactPaths struct {
-	Binary          string                       `yaml:"binary"`
-	Primary         string                       `yaml:"primary,omitempty"`
-	PrimaryByTarget map[string]map[string]string `yaml:"primary_by_target,omitempty"`
+	Binary  string `yaml:"binary"`
+	Primary string `yaml:"primary,omitempty"`
 }
 
 type LoadedManifest struct {
@@ -229,15 +235,10 @@ func (m *LoadedManifest) BinaryName() string {
 }
 
 // ArtifactPath returns the resolved launch/build artifact for the requested target.
-// Target-aware primary artifacts take precedence over artifacts.primary, then artifacts.binary.
+// artifacts.primary takes precedence over artifacts.binary.
 func (m *LoadedManifest) ArtifactPath(ctx BuildContext) string {
 	if isAggregateBuildTarget(ctx.Target) {
 		return ""
-	}
-	if byTarget, ok := m.Manifest.Artifacts.PrimaryByTarget[ctx.Target]; ok {
-		if p := strings.TrimSpace(byTarget[ctx.Mode]); p != "" {
-			return m.mustResolveManifestPath(p)
-		}
 	}
 	if strings.TrimSpace(m.Manifest.Artifacts.Primary) != "" {
 		return m.mustResolveManifestPath(m.Manifest.ArtifactPath())
@@ -276,16 +277,16 @@ func validateManifest(m *LoadedManifest) error {
 		return fmt.Errorf("%s: kind must be %q, %q, or %q", m.Path, KindNative, KindWrapper, KindComposite)
 	}
 
-	switch m.Manifest.Build.Runner {
-	case RunnerGoModule, RunnerCMake, RunnerRecipe:
-	default:
-		return fmt.Errorf("%s: build.runner must be %q, %q, or %q", m.Path, RunnerGoModule, RunnerCMake, RunnerRecipe)
+	if !isSupportedRunner(m.Manifest.Build.Runner) {
+		return fmt.Errorf("%s: build.runner must be one of %s", m.Path, supportedRunnerList())
 	}
 
-	// Artifact validation: binary required for native/wrapper, primary or target-aware primary required for composite.
+	// Artifact validation: binary required for native/wrapper, primary required for composite.
 	hasBinary := strings.TrimSpace(m.Manifest.Artifacts.Binary) != ""
 	hasPrimary := strings.TrimSpace(m.Manifest.Artifacts.Primary) != ""
-	hasPrimaryByTarget := len(m.Manifest.Artifacts.PrimaryByTarget) > 0
+	if hasBinary && hasPrimary {
+		return fmt.Errorf("%s: artifacts.binary and artifacts.primary are mutually exclusive", m.Path)
+	}
 
 	switch m.Manifest.Kind {
 	case KindNative, KindWrapper:
@@ -293,8 +294,8 @@ func validateManifest(m *LoadedManifest) error {
 			return fmt.Errorf("%s: artifacts.binary is required for %s holons", m.Path, m.Manifest.Kind)
 		}
 	case KindComposite:
-		if !hasPrimary && !hasPrimaryByTarget {
-			return fmt.Errorf("%s: artifacts.primary or artifacts.primary_by_target is required for composite holons", m.Path)
+		if !hasPrimary {
+			return fmt.Errorf("%s: artifacts.primary is required for composite holons", m.Path)
 		}
 	}
 	if hasBinary {
@@ -305,19 +306,6 @@ func validateManifest(m *LoadedManifest) error {
 	if hasPrimary {
 		if err := validateManifestRelativeField(m, "artifacts.primary", m.Manifest.Artifacts.Primary); err != nil {
 			return err
-		}
-	}
-	for target, byMode := range m.Manifest.Artifacts.PrimaryByTarget {
-		if len(byMode) == 0 {
-			return fmt.Errorf("%s: artifacts.primary_by_target[%q] must declare at least one mode", m.Path, target)
-		}
-		for mode, relPath := range byMode {
-			if !isValidBuildMode(mode) {
-				return fmt.Errorf("%s: artifacts.primary_by_target[%q] mode %q must be one of debug, release, profile", m.Path, target, mode)
-			}
-			if err := validateManifestRelativeField(m, fmt.Sprintf("artifacts.primary_by_target[%q][%q]", target, mode), relPath); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -494,37 +482,11 @@ func normalizeManifest(m *LoadedManifest) error {
 		m.Manifest.Build.Targets = normalizedTargets
 	}
 
-	if len(m.Manifest.Artifacts.PrimaryByTarget) > 0 {
-		normalizedArtifacts := make(map[string]map[string]string, len(m.Manifest.Artifacts.PrimaryByTarget))
-		for target, byMode := range m.Manifest.Artifacts.PrimaryByTarget {
-			normalizedTarget, err := normalizeBuildTarget(target)
-			if err != nil {
-				return fmt.Errorf("%s: artifacts.primary_by_target[%q]: %w", m.Path, target, err)
-			}
-			if _, exists := normalizedArtifacts[normalizedTarget]; exists {
-				return fmt.Errorf("%s: duplicate artifacts.primary_by_target entry after normalization: %q", m.Path, normalizedTarget)
-			}
-			normalizedModes := make(map[string]string, len(byMode))
-			for mode, relPath := range byMode {
-				normalizedMode := normalizeBuildMode(mode)
-				if !isValidBuildMode(normalizedMode) {
-					return fmt.Errorf("%s: artifacts.primary_by_target[%q] mode %q must be one of debug, release, profile", m.Path, target, mode)
-				}
-				if _, exists := normalizedModes[normalizedMode]; exists {
-					return fmt.Errorf("%s: duplicate artifacts.primary_by_target[%q] mode %q", m.Path, normalizedTarget, normalizedMode)
-				}
-				normalizedModes[normalizedMode] = relPath
-			}
-			normalizedArtifacts[normalizedTarget] = normalizedModes
-		}
-		m.Manifest.Artifacts.PrimaryByTarget = normalizedArtifacts
-	}
-
 	return nil
 }
 
 func validateManifestRelativeField(m *LoadedManifest, field, relPath string) error {
-	if _, err := m.ResolveManifestPath(relPath); err != nil {
+	if _, err := resolveManifestPattern(m.Dir, relPath); err != nil {
 		return fmt.Errorf("%s: %s: %w", m.Path, field, err)
 	}
 	return nil
@@ -545,6 +507,17 @@ func validateBinaryName(m *LoadedManifest, name string) error {
 }
 
 func resolveManifestPath(baseDir, rel string) (string, error) {
+	fullPath, err := resolveManifestPattern(baseDir, rel)
+	if err != nil {
+		return "", err
+	}
+	if containsGlob(rel) {
+		return "", fmt.Errorf("path must not contain glob patterns")
+	}
+	return fullPath, nil
+}
+
+func resolveManifestPattern(baseDir, rel string) (string, error) {
 	trimmed := strings.TrimSpace(rel)
 	if trimmed == "" {
 		return "", fmt.Errorf("path must not be empty")
@@ -562,6 +535,10 @@ func resolveManifestPath(baseDir, rel string) (string, error) {
 		return "", fmt.Errorf("path must stay within the manifest directory")
 	}
 	return fullPath, nil
+}
+
+func containsGlob(path string) bool {
+	return strings.ContainsAny(path, "*?[")
 }
 
 func (s RecipeStep) actionCount() int {

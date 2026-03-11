@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	openv "github.com/organic-programming/grace-op/internal/env"
@@ -12,8 +13,9 @@ import (
 )
 
 type InstallOptions struct {
-	NoBuild  bool
-	Progress progress.Reporter
+	NoBuild          bool
+	LinkApplications bool
+	Progress         progress.Reporter
 }
 
 type InstallReport struct {
@@ -56,19 +58,15 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 	}
 
 	report := baseInstallReport("install", target, ctx)
-	binaryName := target.Manifest.BinaryName()
-	reporter.Step("checking binary...")
-	if binaryName == "" {
-		return report, fmt.Errorf("holon %q has no installable binary (composite with artifacts.primary only)", report.Holon)
-	}
-	report.Binary = binaryName
-
-	artifactPath := target.Manifest.BinaryPath()
+	artifactPath := target.Manifest.ArtifactPath(ctx)
 	report.Artifact = workspaceRelativePath(artifactPath)
-
-	primaryArtifactPath := target.Manifest.PrimaryArtifactPath(ctx)
-	if primaryArtifactPath != "" && filepath.Clean(primaryArtifactPath) != filepath.Clean(artifactPath) {
-		return report, fmt.Errorf("holon %q has non-binary primary artifact %s; non-binary install is out of scope", report.Holon, workspaceRelativePath(primaryArtifactPath))
+	report.Binary = target.Manifest.BinaryName()
+	installName := installNameForArtifact(target, artifactPath)
+	if installName == "" {
+		return report, fmt.Errorf("cannot resolve install name for %q", report.Holon)
+	}
+	if report.Binary == "" {
+		report.Binary = installName
 	}
 
 	if _, err := os.Stat(artifactPath); err != nil {
@@ -76,7 +74,7 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 			return report, err
 		}
 		if opts.NoBuild {
-			return report, fmt.Errorf("artifact missing: %s", report.Artifact)
+			return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
 		}
 
 		reporter.Step("building...")
@@ -86,9 +84,11 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 			return report, buildErr
 		}
 		report.Notes = append(report.Notes, "artifact missing; built before install")
+		artifactPath = target.Manifest.ArtifactPath(ctx)
+		report.Artifact = workspaceRelativePath(artifactPath)
 		if _, statErr := os.Stat(artifactPath); statErr != nil {
 			if os.IsNotExist(statErr) {
-				return report, fmt.Errorf("artifact missing: %s", report.Artifact)
+				return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
 			}
 			return report, statErr
 		}
@@ -98,13 +98,20 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 		return report, fmt.Errorf("prepare %s: %w", openv.OPBIN(), err)
 	}
 
-	installedPath := filepath.Join(openv.OPBIN(), binaryName)
+	installedPath := filepath.Join(openv.OPBIN(), installName)
 	reporter.Step("copying to " + installedPath + "...")
-	if err := copyFile(artifactPath, installedPath); err != nil {
-		return report, fmt.Errorf("install %s: %w", binaryName, err)
+	if err := copyArtifact(artifactPath, installedPath); err != nil {
+		return report, fmt.Errorf("install %s: %w", installName, err)
 	}
 	report.Installed = installedPath
 	report.Notes = append(report.Notes, "installed into "+installedPath)
+	if opts.LinkApplications && isMacAppBundlePath(installedPath) {
+		linkPath, err := linkBundleIntoApplications(installedPath)
+		if err != nil {
+			return report, fmt.Errorf("link %s into Applications: %w", installName, err)
+		}
+		report.Notes = append(report.Notes, "linked into "+linkPath)
+	}
 	return report, nil
 }
 
@@ -133,26 +140,38 @@ func UninstallWithOptions(ref string, opts InstallOptions) (InstallReport, error
 
 	binaryName := strings.TrimSpace(ref)
 	if err == nil {
-		if manifestBinary := target.Manifest.BinaryName(); manifestBinary != "" {
-			binaryName = manifestBinary
+		ctx, ctxErr := resolveBuildContext(target.Manifest, BuildOptions{})
+		if ctxErr == nil {
+			binaryName = installNameForArtifact(target, target.Manifest.ArtifactPath(ctx))
 		} else {
-			binaryName = binaryNameForTarget(target, "")
+			binaryName = installNameForArtifact(target, target.Manifest.ArtifactPath(BuildContext{}))
 		}
 	}
-	if binaryName == "" {
+	if binaryName == "" && err == nil {
 		return report, fmt.Errorf("cannot resolve install name for %q", ref)
 	}
-	report.Binary = binaryName
-
-	installedPath := filepath.Join(openv.OPBIN(), binaryName)
+	if installedPath := lookupInstalledArtifactInOPBIN(binaryName); installedPath != "" {
+		report.Installed = installedPath
+		report.Binary = filepath.Base(installedPath)
+	} else {
+		report.Binary = binaryName
+		report.Installed = filepath.Join(openv.OPBIN(), binaryName)
+	}
+	installedPath := report.Installed
 	report.Installed = installedPath
 	reporter.Step("removing " + installedPath + "...")
-	if removeErr := os.Remove(installedPath); removeErr != nil {
+	if removeErr := os.RemoveAll(installedPath); removeErr != nil {
 		if os.IsNotExist(removeErr) {
 			report.Notes = append(report.Notes, "not installed")
 			return report, nil
 		}
 		return report, fmt.Errorf("remove %s: %w", installedPath, removeErr)
+	}
+	if isMacAppBundlePath(installedPath) && runtime.GOOS == "darwin" {
+		linkPath := filepath.Join(applicationsDir, filepath.Base(installedPath))
+		if _, err := os.Lstat(linkPath); err == nil {
+			_ = os.Remove(linkPath)
+		}
 	}
 	report.Notes = append(report.Notes, "removed "+installedPath)
 	return report, nil

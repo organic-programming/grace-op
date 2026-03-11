@@ -101,9 +101,7 @@ build:
             cwd: work
             argv: ["echo", "hello"]
 artifacts:
-  primary_by_target:
-    darwin:
-      debug: work/app-debug
+  primary: work/app-debug
 `)
 
 	loaded, err := LoadManifest(root)
@@ -119,8 +117,8 @@ artifacts:
 	if _, ok := loaded.Manifest.Build.Targets["macos"]; !ok {
 		t.Fatalf("expected normalized macos target, got %v", loaded.Manifest.Build.Targets)
 	}
-	if _, ok := loaded.Manifest.Artifacts.PrimaryByTarget["macos"]; !ok {
-		t.Fatalf("expected normalized macos artifact entry, got %v", loaded.Manifest.Artifacts.PrimaryByTarget)
+	if got := loaded.Manifest.Artifacts.Primary; got != "work/app-debug" {
+		t.Fatalf("artifacts.primary = %q, want %q", got, "work/app-debug")
 	}
 }
 
@@ -268,11 +266,7 @@ build:
             cwd: app
             argv: ["echo", "ios-simulator"]
 artifacts:
-  primary_by_target:
-    macos:
-      debug: app/macos.app
-    ios-simulator:
-      debug: app/ios-simulator.app
+  primary: app/output.app
 `)
 
 	report, err := ExecuteLifecycle(OperationBuild, root, BuildOptions{
@@ -477,11 +471,7 @@ build:
             cwd: work
             argv: ["touch", "linux.txt"]
 artifacts:
-  primary_by_target:
-    macos:
-      debug: work/macos.txt
-    linux:
-      debug: work/linux.txt
+  primary: work/linux.txt
 `)
 
 	report, err := ExecuteLifecycle(OperationBuild, root, BuildOptions{Target: "linux"})
@@ -681,9 +671,7 @@ build:
             cwd: work
             argv: ["touch", "linux-release.txt"]
 artifacts:
-  primary_by_target:
-    linux:
-      release: work/linux-release.txt
+  primary: work/linux-release.txt
 `)
 
 	report, err := ExecuteLifecycle(OperationBuild, root, BuildOptions{
@@ -742,11 +730,7 @@ build:
             cwd: work
             argv: ["touch", "linux-release.txt"]
 artifacts:
-  primary_by_target:
-    macos:
-      release: work/macos-release.txt
-    linux:
-      release: work/linux-release.txt
+  primary: work/linux-release.txt
 `)
 
 	writeRecipeManifest(t, root, `schema: holon/v0
@@ -762,9 +746,7 @@ build:
       steps:
         - build_member: child
 artifacts:
-  primary_by_target:
-    linux:
-      release: child/work/linux-release.txt
+  primary: child/work/linux-release.txt
 `)
 
 	report, err := ExecuteLifecycle(OperationBuild, root, BuildOptions{

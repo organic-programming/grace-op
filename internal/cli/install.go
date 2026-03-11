@@ -25,6 +25,8 @@ func cmdInstall(format Format, globalQuiet bool, args []string) int {
 		switch arg {
 		case "--no-build":
 			opts.NoBuild = true
+		case "--link-applications":
+			opts.LinkApplications = true
 		default:
 			if strings.HasPrefix(arg, "--") {
 				fmt.Fprintf(os.Stderr, "op install: unknown flag %q\n", arg)

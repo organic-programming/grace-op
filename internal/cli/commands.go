@@ -118,6 +118,8 @@ OP commands:
   op list [root]                         list local + cached holons natively
   op show <uuid-or-prefix>               display a holon identity natively
   op new [--json <payload>]              create a holon identity natively
+  op new --list                          list shipped holon templates
+  op new --template <name> <holon-name>  generate a holon scaffold from a template
   op inspect <slug|host:port> [--json]   inspect a holon's API offline or via Describe
   op mcp <slug> [slug2...]               start an MCP server for one or more holons
   op tools <slug> [--format <fmt>]       output tool definitions (openai, anthropic, mcp)
@@ -125,7 +127,7 @@ OP commands:
   op build [<holon-or-path>] [flags]     build a holon artifact via its runner
   op test [<holon-or-path>]              run a holon's test contract
   op clean [<holon-or-path>]             remove .op/ build outputs
-  op install [<holon-or-path>]           install a built artifact into $OPBIN
+  op install [<holon-or-path>] [flags]   install a built artifact into $OPBIN
   op uninstall <holon>                   remove an installed artifact from $OPBIN
   op mod <command>                       manage holon.mod and holon.sum
   op env [--init] [--shell]              print resolved OPPATH / OPBIN / ROOT
@@ -134,6 +136,10 @@ Build flags:
   --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
   --mode <debug|release|profile>               build mode (default: debug)
   --dry-run                                    print resolved plan, do not execute
+
+Install flags:
+  --no-build                                   fail if the artifact is missing instead of building
+  --link-applications                          symlink installed .app bundles into /Applications (macOS only)
 
 Run flags:
   --listen <URI>                               listen address for service holons (default: stdio://)
@@ -311,9 +317,19 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 
 	printer.Step("resolving " + holonName + "...")
 
+	var resolvedTarget *holons.Target
+	if target, resolveErr := holons.ResolveTarget(holonName); resolveErr == nil && target != nil && target.ManifestErr == nil && target.Manifest != nil {
+		resolvedTarget = target
+	}
+
 	if binary := resolveInstalledBinary(holonName); binary != "" {
 		printer.Step("launching " + holonName + "...")
-		cmd := exec.Command(binary, "serve", "--listen", opts.ListenURI)
+		cmd, err := commandForInstalledArtifact(binary, resolvedTarget, opts.ListenURI)
+		if err != nil {
+			printer.Done("run failed", err)
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -770,6 +786,22 @@ func resolveInstalledBinary(name string) string {
 		return ""
 	}
 	return holons.ResolveInstalledBinary(trimmed)
+}
+
+func commandForInstalledArtifact(path string, target *holons.Target, listenURI string) (*exec.Cmd, error) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if isMacAppBundle(path) && runtime.GOOS == "darwin" {
+			return exec.Command("open", "-W", path), nil
+		}
+		return nil, fmt.Errorf("artifact is not directly launchable: %s", path)
+	}
+	if isHTMLFile(path) {
+		return openFileCommand(path)
+	}
+	if target != nil && target.Manifest != nil && target.Manifest.Manifest.Kind == holons.KindComposite {
+		return exec.Command(path), nil
+	}
+	return exec.Command(path, "serve", "--listen", listenURI), nil
 }
 
 func parseRunArgs(args []string) (string, runOptions, error) {

@@ -1,0 +1,3 @@
+name: hostui-qt
+description: Qt host UI scaffold
+lang: cpp

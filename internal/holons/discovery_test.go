@@ -188,6 +188,47 @@ func TestResolveTargetDoesNotUseAliasesOrGivenNames(t *testing.T) {
 	}
 }
 
+func TestDiscoverInOPBINIncludesBundleArtifacts(t *testing.T) {
+	root := t.TempDir()
+	opbin := filepath.Join(root, "bin")
+	t.Setenv("OPPATH", root)
+	t.Setenv("OPBIN", opbin)
+
+	bundle := filepath.Join(opbin, "demo.app")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(opbin, "demo.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := DiscoverInOPBIN()
+	joined := strings.Join(entries, "\n")
+	if !strings.Contains(joined, "demo.app -> ") {
+		t.Fatalf("DiscoverInOPBIN() missing app bundle: %v", entries)
+	}
+	if !strings.Contains(joined, "demo.html -> ") {
+		t.Fatalf("DiscoverInOPBIN() missing html artifact: %v", entries)
+	}
+}
+
+func TestResolveInstalledBinaryFindsAppBundleBySlug(t *testing.T) {
+	root := t.TempDir()
+	opbin := filepath.Join(root, "bin")
+	t.Setenv("OPPATH", root)
+	t.Setenv("OPBIN", opbin)
+
+	bundle := filepath.Join(opbin, "studio.app")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved := ResolveInstalledBinary("studio")
+	if resolved != bundle {
+		t.Fatalf("ResolveInstalledBinary() = %q, want %q", resolved, bundle)
+	}
+}
+
 type discoveryHolonSeed struct {
 	uuid       string
 	givenName  string

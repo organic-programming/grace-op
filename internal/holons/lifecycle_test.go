@@ -50,6 +50,21 @@ func TestLoadManifestRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestLoadManifestRejectsBinaryAndPrimaryTogether(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ManifestFileName), []byte("schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  members:\n    - id: app\n      path: app\n      type: component\n  targets:\n    macos:\n      steps:\n        - assert_file:\n            path: app/demo.app\nartifacts:\n  binary: demo\n  primary: app/demo.app\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadManifest(root)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "artifacts.binary and artifacts.primary are mutually exclusive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveTargetBySlugAcrossRoots(t *testing.T) {
 	root := t.TempDir()
 	chdirForHolonTest(t, root)

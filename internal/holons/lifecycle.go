@@ -204,9 +204,19 @@ func preflight(manifest *LoadedManifest, ctx BuildContext) error {
 	}
 
 	for _, requiredFile := range manifest.Manifest.Requires.Files {
-		fullPath, err := manifest.ResolveManifestPath(requiredFile)
+		fullPath, err := resolveManifestPattern(manifest.Dir, requiredFile)
 		if err != nil {
 			return fmt.Errorf("invalid required file %q: %w", requiredFile, err)
+		}
+		if containsGlob(requiredFile) {
+			matches, globErr := filepath.Glob(fullPath)
+			if globErr != nil {
+				return fmt.Errorf("invalid required file %q: %w", requiredFile, globErr)
+			}
+			if len(matches) == 0 {
+				return fmt.Errorf("missing required file %q (%s)", requiredFile, workspaceRelativePath(fullPath))
+			}
+			continue
 		}
 		if _, err := os.Stat(fullPath); err != nil {
 			return fmt.Errorf("missing required file %q (%s)", requiredFile, workspaceRelativePath(fullPath))
@@ -275,16 +285,15 @@ func resolveBuildContext(manifest *LoadedManifest, opts BuildOptions) (BuildCont
 }
 
 func runnerFor(manifest *LoadedManifest) (runner, error) {
-	switch manifest.Manifest.Build.Runner {
-	case RunnerGoModule:
-		return goModuleRunner{}, nil
-	case RunnerCMake:
-		return cmakeRunner{}, nil
-	case RunnerRecipe:
-		return recipeRunner{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported runner %q", manifest.Manifest.Build.Runner)
+	if manifest == nil {
+		return nil, fmt.Errorf("manifest required")
 	}
+	name := strings.TrimSpace(manifest.Manifest.Build.Runner)
+	r, ok := runnerRegistry[name]
+	if !ok {
+		return nil, fmt.Errorf("unsupported runner %q", name)
+	}
+	return r, nil
 }
 
 type goModuleRunner struct{}

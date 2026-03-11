@@ -1,0 +1,3 @@
+name: python-daemon
+description: Recipe-backed Python daemon scaffold
+lang: python

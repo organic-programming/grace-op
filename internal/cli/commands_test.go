@@ -137,6 +137,83 @@ func TestRunNativeNewCommandJSON(t *testing.T) {
 	}
 }
 
+func TestRunNewListTemplates(t *testing.T) {
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	output := captureStdout(t, func() {
+		code := Run([]string{"new", "--list"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("new --list returned %d, want 0", code)
+		}
+	})
+
+	for _, expected := range []string{"go-daemon", "wrapper-cli", "composite-go-swiftui"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("template list missing %q: %q", expected, output)
+		}
+	}
+}
+
+func TestRunNewTemplateCreatesScaffold(t *testing.T) {
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	output := captureStdout(t, func() {
+		code := Run([]string{"new", "--template", "go-daemon", "delta-engine", "--set", "service=EchoService"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("template new returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(output, "Created delta-engine from go-daemon") {
+		t.Fatalf("stdout missing creation summary: %q", output)
+	}
+
+	mainPath := filepath.Join(root, "delta-engine", "cmd", "delta-engine", "main.go")
+	data, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) failed: %v", mainPath, err)
+	}
+	if !strings.Contains(string(data), "EchoService ready for delta-engine") {
+		t.Fatalf("generated main.go missing override: %s", string(data))
+	}
+}
+
+func TestRunNewTemplateJSONOutput(t *testing.T) {
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	output := captureStdout(t, func() {
+		code := Run([]string{"--format", "json", "new", "--template", "composite-go-swiftui", "my-console"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("template new json returned %d, want 0", code)
+		}
+	})
+
+	var payload struct {
+		Template string `json:"template"`
+		Dir      string `json:"dir"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatalf("template new json invalid: %v\noutput=%s", err, output)
+	}
+	if payload.Template != "composite-go-swiftui" {
+		t.Fatalf("template = %q, want %q", payload.Template, "composite-go-swiftui")
+	}
+	gotDir, err := filepath.EvalSymlinks(payload.Dir)
+	if err != nil {
+		gotDir = filepath.Clean(payload.Dir)
+	}
+	wantDir, err := filepath.EvalSymlinks(filepath.Join(root, "my-console"))
+	if err != nil {
+		wantDir = filepath.Join(root, "my-console")
+	}
+	if gotDir != wantDir {
+		t.Fatalf("dir = %q, want %q", payload.Dir, wantDir)
+	}
+}
+
 func TestMapHolonCommandToRPC(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -598,33 +675,43 @@ func TestInstallCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
 	})
 
 	if !strings.Contains(stderr, "artifact missing") {
-		t.Fatalf("stderr missing missing-artifact error: %q", stderr)
+		if !strings.Contains(stderr, "artifact not found at") {
+			t.Fatalf("stderr missing missing-artifact error: %q", stderr)
+		}
 	}
 }
 
-func TestInstallCommandRejectsCompositeWithoutBinary(t *testing.T) {
+func TestInstallCommandInstallsCompositeBundle(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)
 	t.Setenv("OPPATH", filepath.Join(root, ".runtime"))
 	t.Setenv("OPBIN", filepath.Join(root, ".runtime", "bin"))
 
 	dir := filepath.Join(root, "composite")
-	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o755); err != nil {
+	bundle := filepath.Join(dir, "app", "MyApp.app")
+	if err := os.MkdirAll(filepath.Join(bundle, "Contents", "MacOS"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "Contents", "MacOS", "MyApp"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte("schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  members:\n    - id: app\n      path: app\n      type: component\n  targets:\n    macos:\n      steps:\n        - exec:\n            cwd: app\n            argv: [\"echo\", \"hello\"]\nartifacts:\n  primary: app/MyApp.app\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	stderr := captureStderr(t, func() {
-		code := Run([]string{"install", dir}, "0.1.0-test")
-		if code != 1 {
-			t.Fatalf("install composite returned %d, want 1", code)
+	output := captureStdout(t, func() {
+		code := Run([]string{"install", "--no-build", dir}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("install composite returned %d, want 0", code)
 		}
 	})
 
-	if !strings.Contains(stderr, "has no installable binary") {
-		t.Fatalf("stderr missing installable-binary error: %q", stderr)
+	installed := filepath.Join(root, ".runtime", "bin", "composite.app")
+	if _, err := os.Stat(filepath.Join(installed, "Contents", "MacOS", "MyApp")); err != nil {
+		t.Fatalf("installed app bundle missing payload: %v", err)
+	}
+	if !strings.Contains(output, "Installed: "+installed) {
+		t.Fatalf("stdout missing installed bundle path: %q", output)
 	}
 }
 
@@ -1206,12 +1293,11 @@ func TestRunCommandRunsCompositePrimaryArtifact(t *testing.T) {
 	target := runtimeTargetForRunTest()
 	artifact := "app/run-app" + executableSuffixForRunTest()
 	manifest := fmt.Sprintf(
-		"schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  defaults:\n    target: %s\n    mode: debug\n  members:\n    - id: app\n      path: app\n      type: component\n  targets:\n    %s:\n      steps:\n        - exec:\n            cwd: app\n            argv: [\"go\", \"build\", \"-o\", \"run-app%s\", \"./cmd/runapp\"]\n        - assert_file:\n            path: %s\nrequires:\n  commands: [go]\n  files: [app/go.mod]\nartifacts:\n  primary_by_target:\n    %s:\n      debug: %s\n",
+		"schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  defaults:\n    target: %s\n    mode: debug\n  members:\n    - id: app\n      path: app\n      type: component\n  targets:\n    %s:\n      steps:\n        - exec:\n            cwd: app\n            argv: [\"go\", \"build\", \"-o\", \"run-app%s\", \"./cmd/runapp\"]\n        - assert_file:\n            path: %s\nrequires:\n  commands: [go]\n  files: [app/go.mod]\nartifacts:\n  primary: %s\n",
 		target,
 		target,
 		executableSuffixForRunTest(),
 		artifact,
-		target,
 		artifact,
 	)
 	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte(manifest), 0o644); err != nil {

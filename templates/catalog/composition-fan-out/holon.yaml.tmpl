@@ -1,0 +1,33 @@
+schema: holon/v0
+uuid: "{{ .UUID }}"
+given_name: "{{ .GivenName }}"
+family_name: "{{ .FamilyName }}"
+motto: Fan-out composition scaffold.
+composer: op
+clade: deterministic/io_bound
+status: draft
+born: "{{ .Date }}"
+parents: []
+reproduction: assisted
+generated_by: op
+lang: multi
+description: Fan-out composition scaffold.
+kind: composite
+build:
+  runner: recipe
+  defaults:
+    target: linux
+    mode: debug
+  members:
+    - id: composition
+      path: flow
+      type: component
+  targets:
+    linux:
+      steps:
+        - assert_file:
+            path: flow/README.md
+requires:
+  files: [flow/README.md]
+artifacts:
+  primary: flow/README.md
