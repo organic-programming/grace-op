@@ -558,6 +558,9 @@ func (recipeRunner) stepBuildMember(manifest *LoadedManifest, ctx BuildContext, 
 	if err != nil {
 		return fmt.Errorf("build_member %q path: %w", memberID, err)
 	}
+	if resolved, err := filepath.EvalSymlinks(memberDir); err == nil {
+		memberDir = resolved
+	}
 	report.Commands = append(report.Commands, "build_member "+memberID)
 	ctx.Progress.Step("building member: " + memberID)
 	childReport, err := ExecuteLifecycle(OperationBuild, memberDir, BuildOptions{
