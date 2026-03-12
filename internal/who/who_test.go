@@ -57,7 +57,7 @@ func TestCreateInteractiveUsesOpBannerAndNoAliasesPrompt(t *testing.T) {
 	if !strings.Contains(text, "op new — New Holon Identity") {
 		t.Fatalf("interactive output missing op banner: %q", text)
 	}
-	if strings.Contains(text, "Sophia Who?") {
+	if strings.Contains(text, "Dummy TestHolon") {
 		t.Fatalf("interactive output still mentions Sophia: %q", text)
 	}
 	if strings.Contains(text, "Aliases") {

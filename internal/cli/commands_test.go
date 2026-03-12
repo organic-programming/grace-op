@@ -38,9 +38,9 @@ func TestRunWhoListThroughTransportChainWithoutBuiltInComposerFails(t *testing.T
 	chdirForTest(t, root)
 
 	seedTransportHolon(t, root, transportHolonSeed{
-		dirName:    "sophia-who",
+		dirName:    "dummy-test",
 		givenName:  "Sophia",
-		familyName: "Who?",
+		familyName: "TestHolon",
 		aliases:    []string{"who", "sophia"},
 		lang:       "go",
 	})
@@ -64,9 +64,9 @@ func TestRunPromotedListNative(t *testing.T) {
 	chdirForTest(t, root)
 
 	seedTransportHolon(t, root, transportHolonSeed{
-		dirName:    "sophia-who",
+		dirName:    "dummy-test",
 		givenName:  "Sophia",
-		familyName: "Who?",
+		familyName: "TestHolon",
 		aliases:    []string{"who", "sophia"},
 		lang:       "go",
 	})
@@ -82,9 +82,9 @@ func TestRunNativeShowCommand(t *testing.T) {
 	chdirForTest(t, root)
 
 	seedTransportHolon(t, root, transportHolonSeed{
-		dirName:    "sophia-who",
+		dirName:    "dummy-test",
 		givenName:  "Sophia",
-		familyName: "Who?",
+		familyName: "TestHolon",
 		aliases:    []string{"who", "sophia"},
 		lang:       "go",
 	})
@@ -96,7 +96,7 @@ func TestRunNativeShowCommand(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(output, "Sophia Who?") {
+	if !strings.Contains(output, "Dummy TestHolon") {
 		t.Fatalf("show output missing identity name: %q", output)
 	}
 	if !strings.Contains(output, "holon.yaml") {

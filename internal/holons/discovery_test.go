@@ -161,14 +161,14 @@ func TestResolveTargetDoesNotUseAliasesOrGivenNames(t *testing.T) {
 	root := t.TempDir()
 	chdirForHolonTest(t, root)
 
-	dir := filepath.Join(root, "sophia-who")
+	dir := filepath.Join(root, "dummy-test")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	id := identity.Identity{
 		UUID:        "1234",
 		GivenName:   "Sophia",
-		FamilyName:  "Who?",
+		FamilyName:  "TestHolon",
 		Motto:       "Know thyself.",
 		Composer:    "test",
 		Clade:       "deterministic/pure",
@@ -178,7 +178,7 @@ func TestResolveTargetDoesNotUseAliasesOrGivenNames(t *testing.T) {
 		GeneratedBy: "test",
 		Lang:        "go",
 	}
-	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\nartifacts:\n  binary: sophia-who\n")
+	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\nartifacts:\n  binary: dummy-test\n")
 
 	if _, err := ResolveTarget("who"); err == nil {
 		t.Fatal("expected alias lookup to fail")

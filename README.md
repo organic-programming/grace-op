@@ -79,8 +79,7 @@ op list                              → list all known holons
 op show <uuid>                       → display a holon's identity
 
 # Full namespace (dispatch to any holon binary)
-op sophia-who list                   → direct holon dispatch
-op who list                          → alias of sophia-who
+op rob-go build                      → direct holon dispatch
 op translate file.md --to fr         → abel-fishel-translator
 
 # OP's own commands
@@ -104,31 +103,30 @@ op new --template go-daemon wisupaa-whisper
 op new --template composite-go-swiftui studio-console
 ```
 
-## Sophia Who? list over every transport
+## Grace OP list over every transport
 
-Use `ListIdentities` (the gRPC equivalent of `sophia-who list`) through each
-transport supported by Sophia Who?:
+Use `ListIdentities` (the gRPC equivalent of `op list`) through each
+transport supported by Grace OP:
 
 ```bash
 # 1) CLI facet (delegated command)
-op who list .
-op sophia-who list .
+op list .
 
-# 2) Promoted verb (same provider behavior as `sophia-who list`)
+# 2) Promoted verb (same provider behavior as `op list`)
 op list .
 
 # 3) gRPC over TCP (persistent server)
-op run sophia-who:9090
+op run grace-op:9090
 op grpc://localhost:9090 ListIdentities '{}'
 # stop with: kill <pid printed by op run>
 
 # 4) gRPC over Unix socket (persistent server)
-op run sophia-who --listen unix:///tmp/who.sock
-op grpc+unix:///tmp/who.sock ListIdentities '{}'
+op run grace-op --listen unix:///tmp/op.sock
+op grpc+unix:///tmp/op.sock ListIdentities '{}'
 # stop with: kill <pid printed by op run>
 
 # 5) gRPC over stdio (ephemeral, no `op run`)
-op grpc+stdio://sophia-who ListIdentities '{}'
+op grpc+stdio://grace-op ListIdentities '{}'
 ```
 
 ## Shell Completion
@@ -149,7 +147,7 @@ are all suggested:
 
 ```
 op run gudule-<TAB>       →  gudule-greeting-godart, gudule-greeting-goswift, ...
-op build sophia<TAB>      →  sophia-who
+op build grace<TAB>       →  grace-op
 op uninstall <TAB>        →  only installed holons from $OPBIN
 ```
 

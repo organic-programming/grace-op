@@ -69,14 +69,14 @@ func TestResolveTargetBySlugAcrossRoots(t *testing.T) {
 	root := t.TempDir()
 	chdirForHolonTest(t, root)
 
-	dir := filepath.Join(root, "organic-programming", "holons", "sophia-who")
+	dir := filepath.Join(root, "organic-programming", "holons", "dummy-test")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	id := identity.Identity{
 		UUID:        "1234",
 		GivenName:   "Sophia",
-		FamilyName:  "Who?",
+		FamilyName:  "TestHolon",
 		Motto:       "Know thyself.",
 		Composer:    "test",
 		Clade:       "deterministic/pure",
@@ -86,14 +86,14 @@ func TestResolveTargetBySlugAcrossRoots(t *testing.T) {
 		GeneratedBy: "test",
 		Lang:        "go",
 	}
-	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\n  main: ./cmd/who\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: sophia-who\n")
+	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\n  main: ./cmd/who\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: dummy-test\n")
 
-	target, err := ResolveTarget("sophia-who")
+	target, err := ResolveTarget("dummy-test")
 	if err != nil {
 		t.Fatalf("ResolveTarget returned error: %v", err)
 	}
-	if got := filepath.Base(target.Dir); got != "sophia-who" {
-		t.Fatalf("dir basename = %q, want %q", got, "sophia-who")
+	if got := filepath.Base(target.Dir); got != "dummy-test" {
+		t.Fatalf("dir basename = %q, want %q", got, "dummy-test")
 	}
 }
 
@@ -101,14 +101,14 @@ func TestResolveBinaryUsesCanonicalArtifactNameForSlug(t *testing.T) {
 	root := t.TempDir()
 	chdirForHolonTest(t, root)
 
-	dir := filepath.Join(root, "organic-programming", "holons", "sophia-who")
+	dir := filepath.Join(root, "organic-programming", "holons", "dummy-test")
 	if err := os.MkdirAll(filepath.Join(dir, ".op", "build", "bin"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	id := identity.Identity{
 		UUID:        "5678",
 		GivenName:   "Sophia",
-		FamilyName:  "Who?",
+		FamilyName:  "TestHolon",
 		Motto:       "Know thyself.",
 		Composer:    "test",
 		Clade:       "deterministic/pure",
@@ -118,13 +118,13 @@ func TestResolveBinaryUsesCanonicalArtifactNameForSlug(t *testing.T) {
 		GeneratedBy: "test",
 		Lang:        "go",
 	}
-	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\n  main: ./cmd/who\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: sophia-who\n")
-	binaryPath := filepath.Join(dir, ".op", "build", "bin", "sophia-who")
+	writeManifestWithIdentity(t, dir, id, "kind: native\nbuild:\n  runner: go-module\n  main: ./cmd/who\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: dummy-test\n")
+	binaryPath := filepath.Join(dir, ".op", "build", "bin", "dummy-test")
 	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	resolved, err := ResolveBinary("sophia-who")
+	resolved, err := ResolveBinary("dummy-test")
 	if err != nil {
 		t.Fatalf("ResolveBinary returned error: %v", err)
 	}

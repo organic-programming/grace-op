@@ -15,10 +15,10 @@ func TestSelectTransport_UnregisteredGoHolonWithoutBinaryIsNotReachable(t *testi
 	chdirForTest(t, root)
 
 	seedTransportHolon(t, root, transportHolonSeed{
-		dirName:    "sophia-who",
+		dirName:    "dummy-test",
 		binaryName: "",
 		givenName:  "Sophia",
-		familyName: "Who?",
+		familyName: "TestHolon",
 		aliases:    []string{"who", "sophia"},
 		lang:       "go",
 	})

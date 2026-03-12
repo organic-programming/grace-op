@@ -80,7 +80,7 @@ func New() Identity {
 		Status:      "draft",
 		Born:        time.Now().Format("2006-01-02"),
 		Parents:     []string{},
-		GeneratedBy: "sophia-who",
+		GeneratedBy: "dummy-test",
 		ProtoStatus: "draft",
 	}
 }

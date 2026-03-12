@@ -180,7 +180,7 @@ Proposed rule:
 
 Examples:
 
-- `sophia-who`: `artifacts.binary: .op/build/bin/sophia-who`
+- `op`: `artifacts.binary: .op/build/bin/op`
 - `wisupaa-whisper`: `artifacts.binary: wisupaa-whisper`
 - `Gudule Greeting Godart`: `artifacts.primary: greeting-godart/build/macos/.../gudule-greeting-godart.app`
 

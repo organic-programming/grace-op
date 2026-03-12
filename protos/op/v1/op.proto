@@ -2,7 +2,7 @@
 //
 // OP is the unified entry point to the Organic Programming ecosystem.
 // It discovers holons, dispatches commands, and manages identity.
-// Identity types (formerly in sophia-who) are defined inline below.
+// Identity types (formerly in dummy-test) are defined inline below.
 
 syntax = "proto3";
 
