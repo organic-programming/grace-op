@@ -144,6 +144,15 @@ func pythonBuildArgs(manifest *LoadedManifest) ([]string, bool, error) {
 	return []string{interpreter, "-m", "pip", "install", "-r", "requirements.txt"}, true, nil
 }
 
+func pythonEntrypoint(manifest *LoadedManifest) (string, error) {
+	for _, rel := range []string{"bin/main.py", "main.py", "app/main.py"} {
+		if fileExists(filepath.Join(manifest.Dir, filepath.FromSlash(rel))) {
+			return rel, nil
+		}
+	}
+	return "", fmt.Errorf("python runner requires bin/main.py, main.py, or app/main.py")
+}
+
 func pythonTestArgs(manifest *LoadedManifest) ([]string, error) {
 	interpreter, err := pythonInterpreter()
 	if err != nil {
@@ -303,18 +312,42 @@ func (pythonRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Re
 	}
 	if !ok {
 		report.Notes = append(report.Notes, "no requirements.txt; skipping dependency install")
+	} else {
+		report.Commands = append(report.Commands, commandString(args))
+		ctx.Progress.Step(commandString(args))
+		if !ctx.DryRun {
+			if output, err := runCommand(manifest.Dir, args); err != nil {
+				return fmt.Errorf("%s\n%s", err, output)
+			}
+			report.Notes = append(report.Notes, "python dependencies installed")
+		}
+	}
+
+	if manifestHasPrimaryArtifact(manifest) || ctx.DryRun {
 		return nil
 	}
-	report.Commands = append(report.Commands, commandString(args))
-	ctx.Progress.Step(commandString(args))
-	if ctx.DryRun {
-		return nil
+
+	entrypoint, err := pythonEntrypoint(manifest)
+	if err != nil {
+		return err
 	}
-	if output, err := runCommand(manifest.Dir, args); err != nil {
-		return fmt.Errorf("%s\n%s", err, output)
+	if err := os.MkdirAll(filepath.Dir(manifest.BinaryPath()), 0o755); err != nil {
+		return err
 	}
-	report.Notes = append(report.Notes, "python dependencies installed")
+	wrapper := fmt.Sprintf("#!/bin/sh\nset -eu\ncd %q\nexec %q %q \"$@\"\n", manifest.Dir, argsOrDefaultPython(), filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)))
+	if err := os.WriteFile(manifest.BinaryPath(), []byte(wrapper), 0o755); err != nil {
+		return err
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("python launcher prepared for %s", entrypoint))
 	return nil
+}
+
+func argsOrDefaultPython() string {
+	interpreter, err := pythonInterpreter()
+	if err != nil {
+		return "python3"
+	}
+	return interpreter
 }
 
 func (pythonRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
@@ -761,7 +794,7 @@ func (gradleRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Re
 	if err != nil {
 		return err
 	}
-	args := append(invoker, "build")
+	args := append(invoker, "build", "installDist")
 	report.Commands = append(report.Commands, commandString(args))
 	ctx.Progress.Step(commandString(args))
 	if ctx.DryRun {

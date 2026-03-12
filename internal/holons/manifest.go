@@ -526,18 +526,10 @@ func resolveManifestPattern(baseDir, rel string) (string, error) {
 		return "", fmt.Errorf("path must not be empty")
 	}
 	if filepath.IsAbs(trimmed) {
-		return "", fmt.Errorf("path must be relative to the manifest directory")
+		return "", fmt.Errorf("path must be relative to the manifest file")
 	}
 	cleaned := filepath.Clean(filepath.FromSlash(trimmed))
-	fullPath := filepath.Join(baseDir, cleaned)
-	relToBase, err := filepath.Rel(baseDir, fullPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve path: %w", err)
-	}
-	if relToBase == ".." || strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path must stay within the manifest directory")
-	}
-	return fullPath, nil
+	return filepath.Join(baseDir, cleaned), nil
 }
 
 func containsGlob(path string) bool {

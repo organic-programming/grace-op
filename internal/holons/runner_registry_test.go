@@ -101,16 +101,16 @@ func TestPythonRunnerDryRunBuildUsesFallbackInterpreter(t *testing.T) {
 	toolDir := t.TempDir()
 	t.Setenv("PATH", toolDir)
 	writeFakeCommand(t, toolDir, "python")
-	if err := os.MkdirAll(filepath.Join(root, "app"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "app", "main.py"), []byte("print('ok')\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "bin", "main.py"), []byte("print('ok')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "requirements.txt"), []byte("pytest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeRunnerManifest(t, root, "schema: holon/v0\nkind: composite\nbuild:\n  runner: python\nartifacts:\n  primary: app/main.py\n")
+	writeRunnerManifest(t, root, "schema: holon/v0\nkind: native\nbuild:\n  runner: python\nartifacts:\n  binary: python-demo\n")
 
 	manifest, err := LoadManifest(root)
 	if err != nil {
@@ -311,7 +311,7 @@ func TestGradleRunnerDryRunBuildUsesWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gradle dry-run build failed: %v", err)
 	}
-	if len(report.Commands) != 1 || !strings.Contains(report.Commands[0], "./gradlew build") {
+	if len(report.Commands) != 1 || !strings.Contains(report.Commands[0], "./gradlew build installDist") {
 		t.Fatalf("unexpected gradle commands: %v", report.Commands)
 	}
 }

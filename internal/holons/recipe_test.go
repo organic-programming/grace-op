@@ -358,36 +358,44 @@ artifacts:
 	}
 }
 
-func TestRecipeValidationRejectsEscapingPaths(t *testing.T) {
+func TestRecipeValidationAllowsParentRelativePaths(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "work"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "assemblies", "demo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "shared"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	writeRecipeManifest(t, root, `schema: holon/v0
+	writeRecipeManifest(t, filepath.Join(root, "assemblies", "demo"), `schema: holon/v0
 kind: composite
 build:
   runner: recipe
   members:
-    - id: work
-      path: ../escape
+    - id: shared
+      path: ../../shared
       type: component
   targets:
     macos:
       steps:
         - exec:
-            cwd: work
+            cwd: ../../shared
             argv: ["echo", "hello"]
+        - copy:
+            from: ../../shared/input.txt
+            to: ../../shared/output.txt
+        - assert_file:
+            path: ../../shared/output.txt
 artifacts:
-  primary: work/my-app
+  primary: ../../shared/output.txt
 `)
 
-	_, err := LoadManifest(root)
-	if err == nil {
-		t.Fatal("expected escaping path error")
+	loaded, err := LoadManifest(filepath.Join(root, "assemblies", "demo"))
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "within the manifest directory") {
-		t.Fatalf("unexpected error: %v", err)
+	if got := loaded.Manifest.Build.Members[0].Path; got != "../../shared" {
+		t.Fatalf("member path = %q, want ../../shared", got)
 	}
 }
 
