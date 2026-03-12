@@ -1003,6 +1003,9 @@ func TestBuildCommandEmitsProgressAndSuggestions(t *testing.T) {
 			t.Fatalf("stderr missing %q: %q", expected, stderr)
 		}
 	}
+	if strings.Contains(stderr, "op test demo  run tests") {
+		t.Fatalf("stderr still renders command and description on one line: %q", stderr)
+	}
 }
 
 func TestBuildCommandJSONSuppressesProgressAndSuggestions(t *testing.T) {

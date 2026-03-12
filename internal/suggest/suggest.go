@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"text/tabwriter"
 
 	openv "github.com/organic-programming/grace-op/internal/env"
 	"github.com/organic-programming/grace-op/internal/holons"
@@ -52,11 +51,20 @@ func Print(w io.Writer, ctx Context) {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  Next steps:")
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, entry := range items {
-		fmt.Fprintf(tw, "    %s\t%s\n", entry.Command, entry.Description)
+		description := strings.TrimSpace(entry.Description)
+		command := strings.TrimSpace(entry.Command)
+		if description != "" {
+			fmt.Fprintf(w, "    - %s\n", description)
+		}
+		if command != "" {
+			if description != "" {
+				fmt.Fprintf(w, "      %s\n", command)
+			} else {
+				fmt.Fprintf(w, "    %s\n", command)
+			}
+		}
 	}
-	_ = tw.Flush()
 	if note != "" {
 		fmt.Fprintf(w, "  Note: %s\n", note)
 	}

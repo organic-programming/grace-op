@@ -174,6 +174,47 @@ func TestDartRunnerDryRunBuildUsesManagedBinaryOutput(t *testing.T) {
 	}
 }
 
+func TestPythonRunnerBuildEmbedsResolvedInterpreterPath(t *testing.T) {
+	root := t.TempDir()
+	toolDir := t.TempDir()
+	t.Setenv("PATH", toolDir)
+	writeFakeCommand(t, toolDir, "python3")
+	pythonPath := filepath.Join(toolDir, "python3")
+	if runtime.GOOS == "windows" {
+		pythonPath += ".bat"
+	}
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "main.py"), []byte("print('ok')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRunnerManifest(t, root, "schema: holon/v0\nkind: native\nbuild:\n  runner: python\nartifacts:\n  binary: python-demo\n")
+
+	manifest, err := LoadManifest(root)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	var report Report
+	err = (pythonRunner{}).build(manifest, BuildContext{
+		Target:   canonicalRuntimeTarget(),
+		Mode:     buildModeDebug,
+		Progress: progress.Silence(),
+	}, &report)
+	if err != nil {
+		t.Fatalf("python build failed: %v", err)
+	}
+
+	wrapper, err := os.ReadFile(manifest.BinaryPath())
+	if err != nil {
+		t.Fatalf("ReadFile(%q) failed: %v", manifest.BinaryPath(), err)
+	}
+	if !strings.Contains(string(wrapper), pythonPath) {
+		t.Fatalf("wrapper missing resolved interpreter path %q: %s", pythonPath, string(wrapper))
+	}
+}
+
 func TestRubyRunnerDryRunBuild(t *testing.T) {
 	root := t.TempDir()
 	toolDir := t.TempDir()

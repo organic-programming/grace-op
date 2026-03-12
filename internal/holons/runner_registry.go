@@ -186,6 +186,24 @@ func pythonInterpreter() (string, error) {
 	return interpreter, nil
 }
 
+func pythonInterpreterPath() (string, error) {
+	for _, candidate := range []string{"python3", "python"} {
+		resolved, err := exec.LookPath(candidate)
+		if err == nil {
+			cmd := exec.Command(resolved, "-c", "import sys; print(sys.executable)")
+			output, outputErr := cmd.Output()
+			if outputErr == nil {
+				actual := strings.TrimSpace(string(output))
+				if actual != "" {
+					return actual, nil
+				}
+			}
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("python runner requires python3 or python on PATH")
+}
+
 func pythonBuildArgs(manifest *LoadedManifest) ([]string, bool, error) {
 	interpreter, err := pythonInterpreter()
 	if err != nil {
@@ -396,7 +414,12 @@ func (pythonRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Re
 	if err := os.MkdirAll(filepath.Dir(manifest.BinaryPath()), 0o755); err != nil {
 		return err
 	}
-	wrapper := fmt.Sprintf("#!/bin/sh\nset -eu\ncd %q\nexec %q %q \"$@\"\n", manifest.Dir, argsOrDefaultPython(), filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)))
+	wrapper := fmt.Sprintf(
+		"#!/bin/sh\nset -eu\ncd %q\nexec %q %q \"$@\"\n",
+		manifest.Dir,
+		argsOrDefaultPythonPath(),
+		filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)),
+	)
 	if err := os.WriteFile(manifest.BinaryPath(), []byte(wrapper), 0o755); err != nil {
 		return err
 	}
@@ -408,6 +431,14 @@ func argsOrDefaultPython() string {
 	interpreter, err := pythonInterpreter()
 	if err != nil {
 		return "python3"
+	}
+	return interpreter
+}
+
+func argsOrDefaultPythonPath() string {
+	interpreter, err := pythonInterpreterPath()
+	if err != nil {
+		return argsOrDefaultPython()
 	}
 	return interpreter
 }

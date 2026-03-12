@@ -38,6 +38,12 @@ func TestBuildSuggestionsIncludeTestInstallRunAndDirectLaunch(t *testing.T) {
 			t.Fatalf("output missing %q: %q", expected, out)
 		}
 	}
+	if strings.Contains(out, "op test rob-go  run tests") {
+		t.Fatalf("output still renders command and description on one line: %q", out)
+	}
+	if !strings.Contains(out, "    - run tests\n      op test rob-go\n") {
+		t.Fatalf("output missing separated command layout: %q", out)
+	}
 }
 
 func TestBuildSuggestionsSkipInstallForCompositeAndNoEmptyBlock(t *testing.T) {
