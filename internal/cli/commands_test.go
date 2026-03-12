@@ -298,7 +298,7 @@ func TestCommandForArtifactIncludesCompositeAssemblyEnv(t *testing.T) {
 		Manifest: holons.Manifest{
 			Kind:       holons.KindComposite,
 			FamilyName: "Greeting-Flutter-Rust",
-			Transport:  "tcp",
+			Transport:  "stdio",
 			Artifacts:  holons.ArtifactPaths{Primary: "build/app"},
 		},
 	}
@@ -311,8 +311,8 @@ func TestCommandForArtifactIncludesCompositeAssemblyEnv(t *testing.T) {
 	if got := envValue(cmd.Env, "OP_ASSEMBLY_FAMILY"); got != "Greeting-Flutter-Rust" {
 		t.Fatalf("OP_ASSEMBLY_FAMILY = %q, want %q", got, "Greeting-Flutter-Rust")
 	}
-	if got := envValue(cmd.Env, "OP_ASSEMBLY_TRANSPORT"); got != "tcp" {
-		t.Fatalf("OP_ASSEMBLY_TRANSPORT = %q, want %q", got, "tcp")
+	if got := envValue(cmd.Env, "OP_ASSEMBLY_TRANSPORT"); got != "stdio" {
+		t.Fatalf("OP_ASSEMBLY_TRANSPORT = %q, want %q", got, "stdio")
 	}
 }
 
@@ -330,7 +330,7 @@ func TestCommandForInstalledArtifactIncludesCompositeAssemblyEnv(t *testing.T) {
 			Manifest: holons.Manifest{
 				Kind:       holons.KindComposite,
 				FamilyName: "Greeting-Flutter-Rust",
-				Transport:  "tcp",
+				Transport:  "stdio",
 			},
 		},
 	}
@@ -343,8 +343,8 @@ func TestCommandForInstalledArtifactIncludesCompositeAssemblyEnv(t *testing.T) {
 	if got := envValue(cmd.Env, "OP_ASSEMBLY_FAMILY"); got != "Greeting-Flutter-Rust" {
 		t.Fatalf("OP_ASSEMBLY_FAMILY = %q, want %q", got, "Greeting-Flutter-Rust")
 	}
-	if got := envValue(cmd.Env, "OP_ASSEMBLY_TRANSPORT"); got != "tcp" {
-		t.Fatalf("OP_ASSEMBLY_TRANSPORT = %q, want %q", got, "tcp")
+	if got := envValue(cmd.Env, "OP_ASSEMBLY_TRANSPORT"); got != "stdio" {
+		t.Fatalf("OP_ASSEMBLY_TRANSPORT = %q, want %q", got, "stdio")
 	}
 }
 
@@ -388,7 +388,7 @@ func TestOpenAppBundleCommandPassesAssemblyEnvOnMacOS(t *testing.T) {
 		Manifest: holons.Manifest{
 			Kind:       holons.KindComposite,
 			FamilyName: "Greeting-Flutter-Rust",
-			Transport:  "tcp",
+			Transport:  "stdio",
 		},
 	}
 
@@ -400,7 +400,7 @@ func TestOpenAppBundleCommandPassesAssemblyEnvOnMacOS(t *testing.T) {
 	if !strings.Contains(args, "OP_ASSEMBLY_DISPLAY_FAMILY=Greeting-Flutter-Rust (Flutter UI)") {
 		t.Fatalf("open args missing display family env: %v", cmd.Args)
 	}
-	if !strings.Contains(args, "OP_ASSEMBLY_TRANSPORT=tcp") {
+	if !strings.Contains(args, "OP_ASSEMBLY_TRANSPORT=stdio") {
 		t.Fatalf("open args missing transport env: %v", cmd.Args)
 	}
 }
