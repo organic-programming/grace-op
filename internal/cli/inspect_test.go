@@ -109,8 +109,14 @@ func TestInspectCommandProtoBackedHolonJSON(t *testing.T) {
 	})
 
 	var payload struct {
-		Slug     string `json:"slug"`
-		Motto    string `json:"motto"`
+		Slug   string `json:"slug"`
+		Motto  string `json:"motto"`
+		Skills []struct {
+			Name string `json:"name"`
+		} `json:"skills"`
+		Sequences []struct {
+			Name string `json:"name"`
+		} `json:"sequences"`
 		Services []struct {
 			Name    string `json:"name"`
 			Methods []struct {
@@ -132,6 +138,12 @@ func TestInspectCommandProtoBackedHolonJSON(t *testing.T) {
 	}
 	if got := len(payload.Services[0].Methods); got != 2 {
 		t.Fatalf("methods = %d, want 2", got)
+	}
+	if len(payload.Skills) != 1 || payload.Skills[0].Name != "multilingual-greeter" {
+		t.Fatalf("unexpected skills payload: %+v", payload.Skills)
+	}
+	if len(payload.Sequences) != 2 || payload.Sequences[0].Name != "multilingual-greeting" || payload.Sequences[1].Name != "greeting-fr-ja-ru-en" {
+		t.Fatalf("unexpected sequences payload: %+v", payload.Sequences)
 	}
 }
 

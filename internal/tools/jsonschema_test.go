@@ -77,3 +77,31 @@ func TestJSONSchemaForMethod(t *testing.T) {
 		t.Fatalf("schema examples = %#v, want one example", schema["examples"])
 	}
 }
+
+func TestJSONSchemaForSequence(t *testing.T) {
+	schema := JSONSchemaForSequence(inspectpkg.Sequence{
+		Name:        "multilingual-greeting",
+		Description: "List available languages then greet the user in the chosen one.",
+		Params: []inspectpkg.SequenceParam{
+			{Name: "name", Description: "Person to greet", Required: true},
+			{Name: "lang_code", Description: "ISO 639-1 language code", Required: true, Default: "en"},
+		},
+	})
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v, want map", schema["properties"])
+	}
+	name, ok := properties["name"].(map[string]any)
+	if !ok || name["type"] != "string" {
+		t.Fatalf("name schema = %#v, want string", properties["name"])
+	}
+	langCode, ok := properties["lang_code"].(map[string]any)
+	if !ok || langCode["default"] != "en" {
+		t.Fatalf("lang_code schema = %#v, want default en", properties["lang_code"])
+	}
+	required, ok := schema["required"].([]string)
+	if !ok || len(required) != 2 {
+		t.Fatalf("required = %#v, want two required params", schema["required"])
+	}
+}

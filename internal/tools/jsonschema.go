@@ -31,11 +31,51 @@ func DefinitionsForCatalogs(catalogs []*inspectpkg.LocalCatalog) []Definition {
 				InputSchema: JSONSchemaForMethod(binding.Method),
 			})
 		}
+		for _, sequence := range catalog.Document.Sequences {
+			out = append(out, Definition{
+				Name:        catalog.Slug + ".sequence." + sequence.Name,
+				Description: strings.TrimSpace(sequence.Description),
+				InputSchema: JSONSchemaForSequence(sequence),
+			})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+func JSONSchemaForSequence(sequence inspectpkg.Sequence) map[string]any {
+	properties := make(map[string]any, len(sequence.Params))
+	required := make([]string, 0)
+
+	for _, param := range sequence.Params {
+		properties[param.Name] = map[string]any{
+			"type": "string",
+		}
+		if strings.TrimSpace(param.Description) != "" {
+			properties[param.Name].(map[string]any)["description"] = strings.TrimSpace(param.Description)
+		}
+		if strings.TrimSpace(param.Default) != "" {
+			properties[param.Name].(map[string]any)["default"] = strings.TrimSpace(param.Default)
+		}
+		if param.Required {
+			required = append(required, param.Name)
+		}
+	}
+
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"additionalProperties": false,
+	}
+	if strings.TrimSpace(sequence.Description) != "" {
+		schema["description"] = strings.TrimSpace(sequence.Description)
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
 }
 
 // JSONSchemaForMethod converts a parsed proto method input into JSON Schema.

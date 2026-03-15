@@ -86,7 +86,7 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		return baseReport(op, target, BuildContext{}), target.ManifestErr
 	}
 	if target.Manifest == nil {
-		return baseReport(op, target, BuildContext{}), fmt.Errorf("no %s found in %s", ManifestFileName, target.RelativePath)
+		return baseReport(op, target, BuildContext{}), fmt.Errorf("no %s found in %s", ManifestSourceLabel(), target.RelativePath)
 	}
 
 	ctx, err := resolveBuildContext(target.Manifest, bo)
@@ -484,9 +484,8 @@ func (recipeRunner) check(manifest *LoadedManifest, ctx BuildContext) error {
 		}
 		// If the member is a holon, its holon.yaml must exist.
 		if member.Type == "holon" {
-			manifestPath := filepath.Join(memberDir, ManifestFileName)
-			if _, err := os.Stat(manifestPath); err != nil {
-				return fmt.Errorf("recipe member %q (type=holon) missing %s in %s", member.ID, ManifestFileName, memberDir)
+			if _, err := LoadManifest(memberDir); err != nil {
+				return fmt.Errorf("recipe member %q (type=holon) missing %s in %s", member.ID, ManifestSourceLabel(), memberDir)
 			}
 		}
 	}

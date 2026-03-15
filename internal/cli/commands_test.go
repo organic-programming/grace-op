@@ -283,6 +283,32 @@ func TestMapHolonCommandToRPC(t *testing.T) {
 	}
 }
 
+func TestDoCommandDryRunProtoBackedSequence(t *testing.T) {
+	repoRoot := inspectRepoRoot(t)
+	chdirForTest(t, repoRoot)
+
+	output := captureStdout(t, func() {
+		code := Run([]string{
+			"do",
+			"gabriel-greeting-go",
+			"multilingual-greeting",
+			"--name=Maria",
+			"--lang_code=fr",
+			"--dry-run",
+		}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("do --dry-run returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(output, `[1/2] op gabriel-greeting-go ListLanguages`) {
+		t.Fatalf("dry run output missing first step: %q", output)
+	}
+	if !strings.Contains(output, `SayHello '{"name":"Maria","lang_code":"fr"}'`) {
+		t.Fatalf("dry run output missing rendered second step: %q", output)
+	}
+}
+
 func TestCommandForArtifactIncludesCompositeAssemblyEnv(t *testing.T) {
 	root := t.TempDir()
 	artifactPath := filepath.Join(root, "build", "app")

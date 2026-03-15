@@ -34,6 +34,10 @@ const (
 	ManifestFileName = "holon.yaml"
 )
 
+func ManifestSourceLabel() string {
+	return identity.ProtoManifestFileName + " or " + ManifestFileName
+}
+
 type Manifest struct {
 	// Identity fields — present in holon.yaml but not used by lifecycle.
 	Schema      string   `yaml:"schema"`
@@ -55,8 +59,9 @@ type Manifest struct {
 	GeneratedBy  string   `yaml:"generated_by,omitempty"`
 
 	// Description.
-	Description string  `yaml:"description,omitempty"`
-	Skills      []Skill `yaml:"skills,omitempty"`
+	Description string     `yaml:"description,omitempty"`
+	Skills      []Skill    `yaml:"skills,omitempty"`
+	Sequences   []Sequence `yaml:"sequences,omitempty"`
 
 	// Operational fields — used by lifecycle.
 	Kind      string        `yaml:"kind"`
@@ -76,6 +81,20 @@ type Skill struct {
 	Description string   `yaml:"description"`
 	When        string   `yaml:"when,omitempty"`
 	Steps       []string `yaml:"steps"`
+}
+
+type Sequence struct {
+	Name        string          `yaml:"name"`
+	Description string          `yaml:"description"`
+	Params      []SequenceParam `yaml:"params,omitempty"`
+	Steps       []string        `yaml:"steps"`
+}
+
+type SequenceParam struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	Required    bool   `yaml:"required,omitempty"`
+	Default     string `yaml:"default,omitempty"`
 }
 
 type BuildConfig struct {
@@ -306,6 +325,9 @@ func manifestFromResolved(resolved *identity.Resolved) Manifest {
 		Parents:      slices.Clone(resolved.Identity.Parents),
 		Reproduction: resolved.Identity.Reproduction,
 		GeneratedBy:  resolved.Identity.GeneratedBy,
+		Description:  resolved.Description,
+		Skills:       manifestSkillsFromResolved(resolved.Skills),
+		Sequences:    manifestSequencesFromResolved(resolved.Sequences),
 		Kind:         resolved.Kind,
 		Transport:    resolved.Transport,
 		Platforms:    slices.Clone(resolved.Platforms),
@@ -325,6 +347,41 @@ func manifestFromResolved(resolved *identity.Resolved) Manifest {
 			Primary: resolved.PrimaryArtifact,
 		},
 	}
+}
+
+func manifestSkillsFromResolved(skills []identity.ResolvedSkill) []Skill {
+	out := make([]Skill, 0, len(skills))
+	for _, skill := range skills {
+		out = append(out, Skill{
+			Name:        strings.TrimSpace(skill.Name),
+			Description: strings.TrimSpace(skill.Description),
+			When:        strings.TrimSpace(skill.When),
+			Steps:       append([]string(nil), skill.Steps...),
+		})
+	}
+	return out
+}
+
+func manifestSequencesFromResolved(sequences []identity.ResolvedSequence) []Sequence {
+	out := make([]Sequence, 0, len(sequences))
+	for _, sequence := range sequences {
+		params := make([]SequenceParam, 0, len(sequence.Params))
+		for _, param := range sequence.Params {
+			params = append(params, SequenceParam{
+				Name:        strings.TrimSpace(param.Name),
+				Description: strings.TrimSpace(param.Description),
+				Required:    param.Required,
+				Default:     strings.TrimSpace(param.Default),
+			})
+		}
+		out = append(out, Sequence{
+			Name:        strings.TrimSpace(sequence.Name),
+			Description: strings.TrimSpace(sequence.Description),
+			Params:      params,
+			Steps:       append([]string(nil), sequence.Steps...),
+		})
+	}
+	return out
 }
 
 func (m *LoadedManifest) SupportsCurrentPlatform() bool {
@@ -480,6 +537,9 @@ func validateManifest(m *LoadedManifest) error {
 	if err := validateList("delegates.commands", m.Manifest.Delegates.Commands); err != nil {
 		return fmt.Errorf("%s: %w", m.Path, err)
 	}
+	if err := validateSequences(m); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -578,6 +638,42 @@ func validateList(field string, values []string) error {
 			return fmt.Errorf("%s contains duplicate value %q", field, trimmed)
 		}
 		seen[trimmed] = struct{}{}
+	}
+	return nil
+}
+
+func validateSequences(m *LoadedManifest) error {
+	seenSequences := make(map[string]struct{}, len(m.Manifest.Sequences))
+	for _, sequence := range m.Manifest.Sequences {
+		name := strings.TrimSpace(sequence.Name)
+		if name == "" {
+			return fmt.Errorf("%s: sequence name must not be empty", m.Path)
+		}
+		if _, exists := seenSequences[name]; exists {
+			return fmt.Errorf("%s: duplicate sequence %q", m.Path, name)
+		}
+		seenSequences[name] = struct{}{}
+
+		if len(sequence.Steps) == 0 {
+			return fmt.Errorf("%s: sequence %q must declare at least one step", m.Path, name)
+		}
+		for i, step := range sequence.Steps {
+			if strings.TrimSpace(step) == "" {
+				return fmt.Errorf("%s: sequence %q step %d must not be empty", m.Path, name, i+1)
+			}
+		}
+
+		seenParams := make(map[string]struct{}, len(sequence.Params))
+		for _, param := range sequence.Params {
+			paramName := strings.TrimSpace(param.Name)
+			if paramName == "" {
+				return fmt.Errorf("%s: sequence %q parameter name must not be empty", m.Path, name)
+			}
+			if _, exists := seenParams[paramName]; exists {
+				return fmt.Errorf("%s: sequence %q has duplicate parameter %q", m.Path, name, paramName)
+			}
+			seenParams[paramName] = struct{}{}
+		}
 	}
 	return nil
 }

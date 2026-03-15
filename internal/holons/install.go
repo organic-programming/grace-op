@@ -49,7 +49,7 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 		return baseInstallReport("install", target, BuildContext{}), target.ManifestErr
 	}
 	if target.Manifest == nil {
-		return baseInstallReport("install", target, BuildContext{}), fmt.Errorf("no %s found in %s", ManifestFileName, target.RelativePath)
+		return baseInstallReport("install", target, BuildContext{}), fmt.Errorf("no %s found in %s", ManifestSourceLabel(), target.RelativePath)
 	}
 
 	ctx, err := resolveBuildContext(target.Manifest, BuildOptions{})

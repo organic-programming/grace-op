@@ -16,7 +16,7 @@ type LocalCatalog struct {
 }
 
 // LoadLocal resolves a slug/path/uuid selector, parses the holon's protos, and
-// attaches identity metadata and skills from holon.yaml.
+// attaches identity metadata, skills, and sequences from the manifest source.
 func LoadLocal(ref string) (*LocalCatalog, error) {
 	target, err := holons.ResolveTarget(ref)
 	if err != nil {
@@ -40,6 +40,7 @@ func LoadLocal(ref string) (*LocalCatalog, error) {
 	}
 	if target.Manifest != nil {
 		catalog.Document.Skills = manifestSkills(target.Manifest.Manifest.Skills)
+		catalog.Document.Sequences = manifestSequences(target.Manifest.Manifest.Sequences)
 	}
 
 	return &LocalCatalog{
@@ -57,6 +58,28 @@ func manifestSkills(skills []holons.Skill) []Skill {
 			Description: strings.TrimSpace(skill.Description),
 			When:        strings.TrimSpace(skill.When),
 			Steps:       append([]string(nil), skill.Steps...),
+		})
+	}
+	return out
+}
+
+func manifestSequences(sequences []holons.Sequence) []Sequence {
+	out := make([]Sequence, 0, len(sequences))
+	for _, sequence := range sequences {
+		params := make([]SequenceParam, 0, len(sequence.Params))
+		for _, param := range sequence.Params {
+			params = append(params, SequenceParam{
+				Name:        strings.TrimSpace(param.Name),
+				Description: strings.TrimSpace(param.Description),
+				Required:    param.Required,
+				Default:     strings.TrimSpace(param.Default),
+			})
+		}
+		out = append(out, Sequence{
+			Name:        strings.TrimSpace(sequence.Name),
+			Description: strings.TrimSpace(sequence.Description),
+			Params:      params,
+			Steps:       append([]string(nil), sequence.Steps...),
 		})
 	}
 	return out

@@ -79,6 +79,42 @@ func RenderText(doc *Document) string {
 		}
 	}
 
+	if len(doc.Sequences) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("  Sequences:\n")
+		for _, sequence := range doc.Sequences {
+			fmt.Fprintf(&b, "    %s", sequence.Name)
+			if sequence.Description != "" {
+				fmt.Fprintf(&b, " - %s", sequence.Description)
+			}
+			b.WriteString("\n")
+			if len(sequence.Params) > 0 {
+				b.WriteString("      Params:\n")
+				for _, param := range sequence.Params {
+					fmt.Fprintf(&b, "        %s", param.Name)
+					if param.Required {
+						b.WriteString(" [required]")
+					}
+					if param.Default != "" {
+						fmt.Fprintf(&b, " default=%q", param.Default)
+					}
+					if param.Description != "" {
+						fmt.Fprintf(&b, " - %s", param.Description)
+					}
+					b.WriteString("\n")
+				}
+			}
+			if len(sequence.Steps) > 0 {
+				b.WriteString("      Steps:\n")
+				for i, step := range sequence.Steps {
+					fmt.Fprintf(&b, "        %d. %s\n", i+1, step)
+				}
+			}
+		}
+	}
+
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 

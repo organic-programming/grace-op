@@ -23,6 +23,9 @@ const (
 type Resolved struct {
 	Identity         Identity
 	SourcePath       string
+	Description      string
+	Skills           []ResolvedSkill
+	Sequences        []ResolvedSequence
 	Kind             string
 	Transport        string
 	Platforms        []string
@@ -34,6 +37,27 @@ type Resolved struct {
 	ArtifactBinary   string
 	PrimaryArtifact  string
 	DelegateCommands []string
+}
+
+type ResolvedSkill struct {
+	Name        string
+	Description string
+	When        string
+	Steps       []string
+}
+
+type ResolvedSequence struct {
+	Name        string
+	Description string
+	Params      []ResolvedSequenceParam
+	Steps       []string
+}
+
+type ResolvedSequenceParam struct {
+	Name        string
+	Description string
+	Required    bool
+	Default     string
 }
 
 // Resolve discovers a holon identity from dir, preferring holon.proto and
@@ -218,6 +242,7 @@ func addExtensions(reg *dynamic.ExtensionRegistry, fd *desc.FileDescriptor, seen
 
 func resolvedFromDynamic(manifest *dynamic.Message) *Resolved {
 	resolved := &Resolved{}
+	resolved.Description = dynString(manifest, 3)
 	resolved.Identity.Lang = dynString(manifest, 4)
 	resolved.Kind = dynString(manifest, 7)
 	resolved.Platforms = dynStringSlice(manifest, 8)
@@ -266,12 +291,50 @@ func resolvedFromDynamic(manifest *dynamic.Message) *Resolved {
 		resolved.PrimaryArtifact = dynString(artifacts, 2)
 	}
 
+	resolved.Skills = make([]ResolvedSkill, 0)
+	for _, skill := range dynSubMessages(manifest, 5) {
+		resolved.Skills = append(resolved.Skills, ResolvedSkill{
+			Name:        dynString(skill, 1),
+			Description: dynString(skill, 2),
+			When:        dynString(skill, 3),
+			Steps:       trimNonEmptyStrings(dynStringSlice(skill, 4)),
+		})
+	}
+
+	resolved.Sequences = make([]ResolvedSequence, 0)
+	for _, sequence := range dynSubMessages(manifest, 14) {
+		params := make([]ResolvedSequenceParam, 0)
+		for _, param := range dynSubMessages(sequence, 3) {
+			params = append(params, ResolvedSequenceParam{
+				Name:        dynString(param, 1),
+				Description: dynString(param, 2),
+				Required:    dynBool(param, 3),
+				Default:     dynString(param, 4),
+			})
+		}
+		resolved.Sequences = append(resolved.Sequences, ResolvedSequence{
+			Name:        dynString(sequence, 1),
+			Description: dynString(sequence, 2),
+			Params:      params,
+			Steps:       trimNonEmptyStrings(dynStringSlice(sequence, 4)),
+		})
+	}
+
 	resolved.Platforms = compactStrings(resolved.Platforms)
 	resolved.RequiredCommands = compactStrings(resolved.RequiredCommands)
 	resolved.RequiredFiles = compactStrings(resolved.RequiredFiles)
 	resolved.MemberPaths = compactStrings(resolved.MemberPaths)
 	resolved.DelegateCommands = compactStrings(resolved.DelegateCommands)
 	return resolved
+}
+
+func dynBool(msg *dynamic.Message, fieldNum int32) bool {
+	val, err := msg.TryGetFieldByNumber(int(fieldNum))
+	if err != nil {
+		return false
+	}
+	b, _ := val.(bool)
+	return b
 }
 
 func dynString(msg *dynamic.Message, fieldNum int32) string {
@@ -398,6 +461,17 @@ func compactStrings(values []string) []string {
 		}
 		seen[trimmed] = struct{}{}
 		out = append(out, trimmed)
+	}
+	return out
+}
+
+func trimNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
 	}
 	return out
 }

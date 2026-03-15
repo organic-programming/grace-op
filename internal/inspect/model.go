@@ -3,10 +3,11 @@ package inspect
 // Document is the normalized output for op inspect, regardless of whether the
 // source is offline proto parsing or HolonMeta.Describe.
 type Document struct {
-	Slug     string    `json:"slug,omitempty"`
-	Motto    string    `json:"motto,omitempty"`
-	Services []Service `json:"services"`
-	Skills   []Skill   `json:"skills,omitempty"`
+	Slug      string     `json:"slug,omitempty"`
+	Motto     string     `json:"motto,omitempty"`
+	Services  []Service  `json:"services"`
+	Skills    []Skill    `json:"skills,omitempty"`
+	Sequences []Sequence `json:"sequences,omitempty"`
 }
 
 type Service struct {
@@ -52,6 +53,20 @@ type Skill struct {
 	Description string   `json:"description"`
 	When        string   `json:"when,omitempty"`
 	Steps       []string `json:"steps,omitempty"`
+}
+
+type Sequence struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Params      []SequenceParam `json:"params,omitempty"`
+	Steps       []string        `json:"steps,omitempty"`
+}
+
+type SequenceParam struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Default     string `json:"default,omitempty"`
 }
 
 const (

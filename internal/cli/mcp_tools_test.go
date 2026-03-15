@@ -221,6 +221,43 @@ func TestMCPCommandPromptsExposeSkills(t *testing.T) {
 	}
 }
 
+func TestMCPCommandListsProtoBackedSequenceTool(t *testing.T) {
+	repoRoot := inspectRepoRoot(t)
+	chdirForTest(t, repoRoot)
+
+	responses, stderr, exitCode := runMCPConversation(t, []string{
+		"mcp", "gabriel-greeting-go",
+	}, []map[string]any{
+		{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "initialize",
+			"params":  map[string]any{},
+		},
+		{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/list",
+			"params":  map[string]any{},
+		},
+	})
+
+	if exitCode != 0 {
+		t.Fatalf("mcp exit code = %d, stderr=%q", exitCode, stderr)
+	}
+
+	toolsResult := responses[1]["result"].(map[string]any)
+	toolsPayload := toolsResult["tools"].([]any)
+
+	var names []string
+	for _, entry := range toolsPayload {
+		names = append(names, entry.(map[string]any)["name"].(string))
+	}
+	if !containsString(names, "gabriel-greeting-go.sequence.multilingual-greeting") {
+		t.Fatalf("tool names missing sequence tool: %#v", names)
+	}
+}
+
 func TestToolsCommandOpenAIFormat(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)

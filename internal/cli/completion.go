@@ -36,7 +36,7 @@ func cmdComplete(args []string) int {
 	}
 
 	switch verb {
-	case "build", "run", "install", "check", "test", "clean", "inspect", "show":
+	case "build", "run", "install", "check", "test", "clean", "inspect", "show", "do":
 		completeSlugs(prefix)
 	case "uninstall":
 		completeInstalled(prefix)
@@ -95,7 +95,7 @@ func completeInstalled(prefix string) {
 // completeVerbs lists op subcommands matching the prefix.
 func completeVerbs(prefix string) {
 	verbs := []string{
-		"build", "check", "clean", "completion", "discover",
+		"build", "check", "clean", "completion", "discover", "do",
 		"env", "help", "inspect", "install", "list", "mcp",
 		"mod", "new", "run", "serve", "show", "test", "tools",
 		"uninstall", "version",
@@ -120,7 +120,7 @@ _op() {
     fi
 
     case "${words[2]}" in
-        build|run|install|check|test|clean|inspect|show)
+        build|run|install|check|test|clean|inspect|show|do)
             local -a slugs
             slugs=($(op __complete "${words[2]}" "${words[CURRENT]}"))
             _describe 'holons' slugs
@@ -147,7 +147,7 @@ const bashCompletion = `_op() {
     fi
 
     case "${COMP_WORDS[1]}" in
-        build|run|install|check|test|clean|inspect|show)
+        build|run|install|check|test|clean|inspect|show|do)
             COMPREPLY=($(compgen -W "$(op __complete "${COMP_WORDS[1]}" "$cur")" -- "$cur"))
             ;;
         uninstall)

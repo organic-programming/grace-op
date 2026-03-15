@@ -11,6 +11,7 @@ import (
 	"time"
 
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
+	dopkg "github.com/organic-programming/grace-op/internal/do"
 	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
 	toolspkg "github.com/organic-programming/grace-op/internal/tools"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -31,7 +32,8 @@ type Server struct {
 type toolBinding struct {
 	slug       string
 	definition toolspkg.Definition
-	method     inspectpkg.MethodBinding
+	method     *inspectpkg.MethodBinding
+	sequence   *inspectpkg.Sequence
 }
 
 type promptDefinition struct {
@@ -89,7 +91,8 @@ func NewServer(slugs []string, version string) (*Server, error) {
 	definitions := toolspkg.DefinitionsForCatalogs(catalogs)
 	toolIndex := make(map[string]toolBinding, len(definitions))
 	for _, catalog := range catalogs {
-		for _, method := range catalog.Methods {
+		for i := range catalog.Methods {
+			method := catalog.Methods[i]
 			name := method.ToolName(catalog.Slug)
 			for _, definition := range definitions {
 				if definition.Name != name {
@@ -98,7 +101,22 @@ func NewServer(slugs []string, version string) (*Server, error) {
 				toolIndex[name] = toolBinding{
 					slug:       catalog.Slug,
 					definition: definition,
-					method:     method,
+					method:     &method,
+				}
+				break
+			}
+		}
+		for i := range catalog.Document.Sequences {
+			sequence := catalog.Document.Sequences[i]
+			name := catalog.Slug + ".sequence." + sequence.Name
+			for _, definition := range definitions {
+				if definition.Name != name {
+					continue
+				}
+				toolIndex[name] = toolBinding{
+					slug:       catalog.Slug,
+					definition: definition,
+					sequence:   &sequence,
 				}
 				break
 			}
@@ -241,6 +259,20 @@ func (s *Server) handleToolCall(ctx context.Context, params json.RawMessage) (ma
 		}, nil
 	}
 
+	if binding.sequence != nil {
+		return s.handleSequenceCall(request.Name, binding, request.Arguments)
+	}
+
+	if binding.method == nil {
+		return map[string]any{
+			"content": []textContent{{
+				Type: "text",
+				Text: fmt.Sprintf("tool %q is not bound to a callable target", request.Name),
+			}},
+			"isError": true,
+		}, nil
+	}
+
 	if binding.method.Descriptor.IsStreamingClient() || binding.method.Descriptor.IsStreamingServer() {
 		return map[string]any{
 			"content": []textContent{{
@@ -375,6 +407,9 @@ func buildPromptDefinitions(catalogs []*inspectpkg.LocalCatalog) []promptDefinit
 		for _, method := range catalog.Methods {
 			toolNames = append(toolNames, method.ToolName(catalog.Slug))
 		}
+		for _, sequence := range catalog.Document.Sequences {
+			toolNames = append(toolNames, catalog.Slug+".sequence."+sequence.Name)
+		}
 		sort.Strings(toolNames)
 
 		for _, skill := range catalog.Document.Skills {
@@ -415,4 +450,76 @@ func buildPromptDefinitions(catalogs []*inspectpkg.LocalCatalog) []promptDefinit
 
 func bytesTrimSpace(data []byte) []byte {
 	return []byte(strings.TrimSpace(string(data)))
+}
+
+func (s *Server) handleSequenceCall(name string, binding toolBinding, args map[string]any) (map[string]any, error) {
+	params := make(map[string]string, len(args))
+	for key, value := range args {
+		params[key] = stringifyArgument(value)
+	}
+
+	result, err := dopkg.Run(binding.slug, binding.sequence.Name, dopkg.Options{
+		Params: params,
+	})
+
+	payload := any(result)
+	isError := false
+	if err != nil {
+		isError = true
+		payload = struct {
+			*dopkg.Result
+			Error string `json:"error"`
+		}{
+			Result: result,
+			Error:  err.Error(),
+		}
+	}
+
+	body, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return map[string]any{
+			"content": []textContent{{
+				Type: "text",
+				Text: fmt.Sprintf("marshal response for %s failed: %v", name, marshalErr),
+			}},
+			"isError": true,
+		}, nil
+	}
+
+	var structured map[string]any
+	if err := json.Unmarshal(body, &structured); err != nil {
+		return map[string]any{
+			"content": []textContent{{
+				Type: "text",
+				Text: string(body),
+			}},
+			"isError": isError,
+		}, nil
+	}
+
+	pretty, _ := json.MarshalIndent(structured, "", "  ")
+	response := map[string]any{
+		"content": []textContent{{
+			Type: "text",
+			Text: string(pretty),
+		}},
+		"structuredContent": structured,
+	}
+	if isError {
+		response["isError"] = true
+	}
+	return response, nil
+}
+
+func stringifyArgument(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
 }

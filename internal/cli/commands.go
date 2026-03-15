@@ -60,6 +60,8 @@ func Run(args []string, version string) int {
 		return cmdDiscover(format)
 	case "inspect":
 		return cmdInspect(format, rest)
+	case "do":
+		return cmdDo(format, quiet, rest)
 	case "mcp":
 		return cmdMCP(rest, version)
 	case "tools":
@@ -125,9 +127,11 @@ OP commands:
   op new --list                          list shipped holon templates
   op new --template <name> <holon-name>  generate a holon scaffold from a template
   op inspect <slug|host:port> [--json]   inspect a holon's API offline or via Describe
+  op do <holon> <sequence> [--param=value ...]
+                                         run a declared manifest sequence
   op mcp <slug> [slug2...]               start an MCP server for one or more holons
   op tools <slug> [--format <fmt>]       output tool definitions (openai, anthropic, mcp)
-  op check [<holon-or-path>]             validate holon.yaml and prerequisites
+  op check [<holon-or-path>]             validate the holon manifest and prerequisites
   op build [<holon-or-path>] [flags]     build a holon artifact via its runner
   op test [<holon-or-path>]              run a holon's test contract
   op clean [<holon-or-path>]             remove .op/ build outputs
@@ -362,7 +366,7 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		return 1
 	}
 	if target.Manifest == nil {
-		err := fmt.Errorf("no %s found in %s", holons.ManifestFileName, target.RelativePath)
+		err := fmt.Errorf("no %s found in %s", holons.ManifestSourceLabel(), target.RelativePath)
 		printer.Done("run failed", err)
 		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
