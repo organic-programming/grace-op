@@ -664,6 +664,8 @@ func (rubyRunner) clean(manifest *LoadedManifest, report *Report) error {
 
 type swiftPackageRunner struct{}
 
+var swiftPackageRunCommand = runCommand
+
 func (swiftPackageRunner) check(manifest *LoadedManifest, _ BuildContext) error {
 	if err := requireRunnerCommands("swift", "xcodebuild"); err != nil {
 		return err
@@ -690,8 +692,24 @@ func (swiftPackageRunner) build(manifest *LoadedManifest, ctx BuildContext, repo
 		if ctx.DryRun {
 			return nil
 		}
-		if output, err := runCommand(manifest.Dir, args); err != nil {
-			return fmt.Errorf("%s\n%s", err, output)
+		output, err := swiftPackageRunCommand(manifest.Dir, args)
+		if err != nil {
+			if !isSwiftBuildDescriptionCorruption(output) {
+				return fmt.Errorf("%s\n%s", err, output)
+			}
+
+			cleanArgs := []string{"swift", "package", "clean", "--build-path", buildPath}
+			report.Commands = append(report.Commands, commandString(cleanArgs), commandString(args))
+			ctx.Progress.Step(commandString(cleanArgs))
+			if cleanOutput, cleanErr := swiftPackageRunCommand(manifest.Dir, cleanArgs); cleanErr != nil {
+				return fmt.Errorf("%s\n%s\n%s\n%s", err, output, cleanErr, cleanOutput)
+			}
+
+			ctx.Progress.Step(commandString(args))
+			if output, err = swiftPackageRunCommand(manifest.Dir, args); err != nil {
+				return fmt.Errorf("%s\n%s", err, output)
+			}
+			report.Notes = append(report.Notes, "swift build cache reset after unknown build description")
 		}
 		source := filepath.Join(buildPath, swiftBuildMode(ctx.Mode), hostExecutableName(manifest.BinaryName()))
 		if err := syncBinaryArtifact(manifest, source); err != nil {
@@ -780,6 +798,10 @@ func swiftBuildMode(mode string) string {
 		return "debug"
 	}
 	return "release"
+}
+
+func isSwiftBuildDescriptionCorruption(output string) bool {
+	return strings.Contains(strings.ToLower(output), "unknown build description")
 }
 
 type flutterRunner struct{}

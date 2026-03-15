@@ -4,7 +4,6 @@
 package grpcclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -418,28 +417,8 @@ func DialStdio(binaryPath, methodName, inputJSON string) (*CallResult, error) {
 		cmd.Wait()         //nolint:errcheck
 	}()
 
-	// Wait for the server to write its HTTP/2 SETTINGS frame.
-	// Reading the first byte proves the gRPC server is alive and
-	// the pipe is functional. We prepend it back via MultiReader.
-	firstByte := make([]byte, 1)
-	readCh := make(chan error, 1)
-	go func() {
-		_, err := io.ReadFull(stdoutPipe, firstByte)
-		readCh <- err
-	}()
-	select {
-	case err := <-readCh:
-		if err != nil {
-			return nil, fmt.Errorf("server did not start: %w", err)
-		}
-	case <-ctx.Done():
-		return nil, fmt.Errorf("server startup timeout")
-	}
-
-	// Create a net.Conn backed by the process's stdin/stdout.
-	// Prepend the first byte we already consumed.
 	pConn := &pipeConn{
-		reader: io.MultiReader(bytes.NewReader(firstByte), stdoutPipe),
+		reader: stdoutPipe,
 		writer: stdinPipe,
 	}
 
@@ -465,6 +444,9 @@ func DialStdio(binaryPath, methodName, inputJSON string) (*CallResult, error) {
 		grpc.WithBlock(),
 	)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("server startup timeout")
+		}
 		return nil, fmt.Errorf("create grpc client over stdio: %w", err)
 	}
 	defer conn.Close()
@@ -474,16 +456,20 @@ func DialStdio(binaryPath, methodName, inputJSON string) (*CallResult, error) {
 
 // pipeConn wraps an io.ReadCloser + io.WriteCloser as a net.Conn.
 type pipeConn struct {
-	reader interface{ Read([]byte) (int, error) }
-	writer interface {
-		Write([]byte) (int, error)
-		Close() error
-	}
+	reader io.ReadCloser
+	writer io.WriteCloser
 }
 
-func (c *pipeConn) Read(p []byte) (int, error)         { return c.reader.Read(p) }
-func (c *pipeConn) Write(p []byte) (int, error)        { return c.writer.Write(p) }
-func (c *pipeConn) Close() error                       { return c.writer.Close() }
+func (c *pipeConn) Read(p []byte) (int, error)  { return c.reader.Read(p) }
+func (c *pipeConn) Write(p []byte) (int, error) { return c.writer.Write(p) }
+func (c *pipeConn) Close() error {
+	writeErr := c.writer.Close()
+	readErr := c.reader.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return readErr
+}
 func (c *pipeConn) LocalAddr() net.Addr                { return pipeAddr{} }
 func (c *pipeConn) RemoteAddr() net.Addr               { return pipeAddr{} }
 func (c *pipeConn) SetDeadline(_ time.Time) error      { return nil }

@@ -1,6 +1,7 @@
 package holons
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -321,6 +322,76 @@ func TestSwiftPackageRunnerDryRunBuild(t *testing.T) {
 	}
 	if len(report.Commands) != 1 || !strings.Contains(report.Commands[0], "swift build --build-path") {
 		t.Fatalf("unexpected swift commands: %v", report.Commands)
+	}
+}
+
+func TestSwiftPackageRunnerRecoversFromUnknownBuildDescription(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Package.swift"), []byte("// swift-tools-version: 6.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRunnerManifest(t, root, "schema: holon/v0\nkind: native\nbuild:\n  runner: swift-package\nartifacts:\n  binary: swift-demo\n")
+
+	manifest, err := LoadManifest(root)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+
+	originalRunCommand := swiftPackageRunCommand
+	t.Cleanup(func() {
+		swiftPackageRunCommand = originalRunCommand
+	})
+
+	buildPath := filepath.Join(manifest.OpRoot(), "build", "swift")
+	buildCalls := 0
+	var commands []string
+	swiftPackageRunCommand = func(dir string, args []string) (string, error) {
+		commands = append(commands, commandString(args))
+		switch {
+		case len(args) >= 2 && args[0] == "swift" && args[1] == "build":
+			buildCalls++
+			if buildCalls == 1 {
+				return "error: unknown build description", fmt.Errorf("%s failed: exit status 1", commandString(args))
+			}
+			source := filepath.Join(buildPath, "debug", hostExecutableName(manifest.BinaryName()))
+			if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+				t.Fatalf("mkdir build output: %v", err)
+			}
+			if err := os.WriteFile(source, []byte("swift-binary"), 0o755); err != nil {
+				t.Fatalf("write build output: %v", err)
+			}
+			return "", nil
+		case len(args) >= 3 && args[0] == "swift" && args[1] == "package" && args[2] == "clean":
+			return "", nil
+		default:
+			t.Fatalf("unexpected command: %v", args)
+			return "", nil
+		}
+	}
+
+	var report Report
+	err = (swiftPackageRunner{}).build(manifest, BuildContext{
+		Target:   canonicalRuntimeTarget(),
+		Mode:     buildModeDebug,
+		Progress: progress.Silence(),
+	}, &report)
+	if err != nil {
+		t.Fatalf("swift-package build recovery failed: %v", err)
+	}
+	if buildCalls != 2 {
+		t.Fatalf("expected 2 swift build attempts, got %d", buildCalls)
+	}
+	if len(commands) != 3 {
+		t.Fatalf("unexpected command sequence: %v", commands)
+	}
+	if !strings.Contains(commands[1], "swift package clean --build-path") {
+		t.Fatalf("expected recovery clean command, got %v", commands)
+	}
+	if !strings.Contains(strings.Join(report.Notes, "\n"), "swift build cache reset after unknown build description") {
+		t.Fatalf("expected recovery note, got %v", report.Notes)
+	}
+	if _, err := os.Stat(manifest.BinaryPath()); err != nil {
+		t.Fatalf("expected recovered binary at %s: %v", manifest.BinaryPath(), err)
 	}
 }
 
