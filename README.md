@@ -84,6 +84,7 @@ op translate file.md --to fr         → abel-fishel-translator
 
 # OP's own commands
 op discover                          → list all available holons
+op install my-app                    → build and install into ~/.op/bin
 op install my-app --no-build         → install an existing artifact
 op install my-ui --link-applications → install a .app and link it on macOS
 op mod pull                          → fetch dependencies into $OPPATH/cache

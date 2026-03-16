@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -33,10 +34,49 @@ type Resolved struct {
 	RequiredFiles    []string
 	RequiredCommands []string
 	BuildMain        string
+	BuildDefaults    *ResolvedRecipeDefaults
+	BuildMembers     []ResolvedRecipeMember
+	BuildTargets     map[string]ResolvedRecipeTarget
 	MemberPaths      []string
 	ArtifactBinary   string
 	PrimaryArtifact  string
 	DelegateCommands []string
+}
+
+type ResolvedRecipeDefaults struct {
+	Target string
+	Mode   string
+}
+
+type ResolvedRecipeMember struct {
+	ID   string
+	Path string
+	Type string
+}
+
+type ResolvedRecipeTarget struct {
+	Steps []ResolvedRecipeStep
+}
+
+type ResolvedRecipeStep struct {
+	BuildMember string
+	Exec        *ResolvedRecipeExec
+	Copy        *ResolvedRecipeCopy
+	AssertFile  *ResolvedRecipeFile
+}
+
+type ResolvedRecipeExec struct {
+	Cwd  string
+	Argv []string
+}
+
+type ResolvedRecipeCopy struct {
+	From string
+	To   string
+}
+
+type ResolvedRecipeFile struct {
+	Path string
 }
 
 type ResolvedSkill struct {
@@ -269,10 +309,29 @@ func resolvedFromDynamic(manifest *dynamic.Message) *Resolved {
 	if build := dynSubMessage(manifest, 10); build != nil {
 		resolved.BuildRunner = dynString(build, 1)
 		resolved.BuildMain = dynString(build, 2)
+		if defaults := dynSubMessage(build, 3); defaults != nil {
+			resolved.BuildDefaults = &ResolvedRecipeDefaults{
+				Target: dynString(defaults, 1),
+				Mode:   dynString(defaults, 2),
+			}
+		}
+		resolved.BuildMembers = make([]ResolvedRecipeMember, 0)
 		resolved.MemberPaths = make([]string, 0)
 		for _, member := range dynSubMessages(build, 4) {
-			if path := strings.TrimSpace(dynString(member, 2)); path != "" {
+			resolvedMember := ResolvedRecipeMember{
+				ID:   dynString(member, 1),
+				Path: dynString(member, 2),
+				Type: dynString(member, 3),
+			}
+			resolved.BuildMembers = append(resolved.BuildMembers, resolvedMember)
+			if path := strings.TrimSpace(resolvedMember.Path); path != "" {
 				resolved.MemberPaths = append(resolved.MemberPaths, path)
+			}
+		}
+		if targets := dynStringMessageMap(build, 5); len(targets) > 0 {
+			resolved.BuildTargets = make(map[string]ResolvedRecipeTarget, len(targets))
+			for key, target := range targets {
+				resolved.BuildTargets[key] = resolvedRecipeTargetFromDynamic(target)
 			}
 		}
 	}
@@ -328,6 +387,40 @@ func resolvedFromDynamic(manifest *dynamic.Message) *Resolved {
 	return resolved
 }
 
+func resolvedRecipeTargetFromDynamic(target *dynamic.Message) ResolvedRecipeTarget {
+	resolved := ResolvedRecipeTarget{
+		Steps: make([]ResolvedRecipeStep, 0),
+	}
+	for _, step := range dynSubMessages(target, 1) {
+		resolved.Steps = append(resolved.Steps, resolvedRecipeStepFromDynamic(step))
+	}
+	return resolved
+}
+
+func resolvedRecipeStepFromDynamic(step *dynamic.Message) ResolvedRecipeStep {
+	resolved := ResolvedRecipeStep{
+		BuildMember: dynString(step, 3),
+	}
+	if exec := dynSubMessage(step, 1); exec != nil {
+		resolved.Exec = &ResolvedRecipeExec{
+			Cwd:  dynString(exec, 1),
+			Argv: dynStringSlice(exec, 2),
+		}
+	}
+	if copy := dynSubMessage(step, 2); copy != nil {
+		resolved.Copy = &ResolvedRecipeCopy{
+			From: dynString(copy, 1),
+			To:   dynString(copy, 2),
+		}
+	}
+	if assertFile := dynSubMessage(step, 4); assertFile != nil {
+		resolved.AssertFile = &ResolvedRecipeFile{
+			Path: dynString(assertFile, 1),
+		}
+	}
+	return resolved
+}
+
 func dynBool(msg *dynamic.Message, fieldNum int32) bool {
 	val, err := msg.TryGetFieldByNumber(int(fieldNum))
 	if err != nil {
@@ -372,6 +465,48 @@ func dynSubMessages(msg *dynamic.Message, fieldNum int32) []*dynamic.Message {
 			}
 		}
 		return out
+	default:
+		return nil
+	}
+}
+
+func dynStringMessageMap(msg *dynamic.Message, fieldNum int32) map[string]*dynamic.Message {
+	val, err := msg.TryGetFieldByNumber(int(fieldNum))
+	if err != nil || val == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(val)
+	if !rv.IsValid() || rv.Kind() != reflect.Map {
+		return nil
+	}
+
+	out := make(map[string]*dynamic.Message, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		key, ok := iter.Key().Interface().(string)
+		if !ok {
+			continue
+		}
+		sub := dynMessageValue(iter.Value().Interface())
+		if sub == nil {
+			continue
+		}
+		out[key] = sub
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func dynMessageValue(value any) *dynamic.Message {
+	switch typed := value.(type) {
+	case *dynamic.Message:
+		return typed
+	case dynamic.Message:
+		copy := typed
+		return &copy
 	default:
 		return nil
 	}

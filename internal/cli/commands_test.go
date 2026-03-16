@@ -869,6 +869,63 @@ func TestInstallCommand(t *testing.T) {
 	}
 }
 
+func TestInstallCommandRebuildsExistingArtifact(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+	t.Setenv("OPPATH", filepath.Join(root, ".runtime"))
+	t.Setenv("OPBIN", filepath.Join(root, ".runtime", "bin"))
+
+	dir := filepath.Join(root, "demo")
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".op", "build", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/demo\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "demo", "main.go"), []byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"fresh\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "holon.yaml"), []byte("schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	staleArtifact := []byte("#!/bin/sh\necho stale\n")
+	staleMode := os.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		staleArtifact = []byte("@echo off\r\necho stale\r\n")
+		staleMode = 0o644
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".op", "build", "bin", "demo"), staleArtifact, staleMode); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() {
+		code := Run([]string{"install", dir}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("install returned %d, want 0", code)
+		}
+	})
+
+	installed := filepath.Join(root, ".runtime", "bin", "demo")
+	result, err := exec.Command(installed).CombinedOutput()
+	if err != nil {
+		t.Fatalf("running installed binary failed: %v\noutput=%s", err, result)
+	}
+	if got := strings.TrimSpace(string(result)); got != "fresh" {
+		t.Fatalf("installed binary output = %q, want %q", got, "fresh")
+	}
+	if !strings.Contains(output, "rebuilt before install") {
+		t.Fatalf("install output missing rebuild note: %q", output)
+	}
+}
+
 func TestInstallCommandJSONFormat(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go command not available")

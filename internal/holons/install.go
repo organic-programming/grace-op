@@ -69,29 +69,45 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 		report.Binary = installName
 	}
 
+	artifactExisted := true
 	if _, err := os.Stat(artifactPath); err != nil {
 		if !os.IsNotExist(err) {
 			return report, err
 		}
-		if opts.NoBuild {
+		artifactExisted = false
+	}
+
+	if opts.NoBuild {
+		if !artifactExisted {
 			return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
 		}
-
+	} else {
+		if artifactExisted {
+			if err := os.RemoveAll(artifactPath); err != nil {
+				return report, fmt.Errorf("remove stale artifact %s: %w", report.Artifact, err)
+			}
+		}
 		reporter.Step("building...")
 		_, buildErr := ExecuteLifecycle(OperationBuild, ref, BuildOptions{Progress: progress.Silence()})
 		if buildErr != nil {
 			report.Notes = append(report.Notes, "build failed before install")
 			return report, buildErr
 		}
-		report.Notes = append(report.Notes, "artifact missing; built before install")
+		if artifactExisted {
+			report.Notes = append(report.Notes, "rebuilt before install")
+		} else {
+			report.Notes = append(report.Notes, "artifact missing; built before install")
+		}
+
 		artifactPath = target.Manifest.ArtifactPath(ctx)
 		report.Artifact = workspaceRelativePath(artifactPath)
-		if _, statErr := os.Stat(artifactPath); statErr != nil {
-			if os.IsNotExist(statErr) {
-				return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
-			}
-			return report, statErr
+	}
+
+	if _, err := os.Stat(artifactPath); err != nil {
+		if os.IsNotExist(err) {
+			return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
 		}
+		return report, err
 	}
 
 	if err := openv.Init(); err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,45 @@ import (
 func writeRecipeManifest(t *testing.T, dir, yaml string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, ManifestFileName), []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeProtoRecipeManifest(t *testing.T, root, dir, body string) {
+	t.Helper()
+
+	writeSharedHolonManifestProto(t, root)
+	if err := os.MkdirAll(filepath.Join(dir, "v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	proto := fmt.Sprintf(`syntax = "proto3";
+
+package test.v1;
+
+import "holons/v1/manifest.proto";
+
+option (holons.v1.manifest) = {
+  identity: {
+    schema: "holon/v1"
+    uuid: "%s-uuid"
+    given_name: "Proto"
+    family_name: "Recipe"
+    motto: "Proto-backed recipe test holon."
+    composer: "test"
+    clade: "deterministic/pure"
+    status: "draft"
+    born: "2026-03-15"
+  }
+  lineage: {
+    reproduction: "manual"
+    generated_by: "test"
+  }
+%s
+};
+`, filepath.Base(dir), strings.TrimSpace(body))
+
+	if err := os.WriteFile(filepath.Join(dir, "v1", "holon.proto"), []byte(proto), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -172,6 +212,273 @@ artifacts:
 	}
 	if got := loaded.Manifest.Artifacts.Primary; got != "work/app-debug" {
 		t.Fatalf("artifacts.primary = %q, want %q", got, "work/app-debug")
+	}
+}
+
+func TestLoadManifestAcceptsProtoBackedCompositeRecipe(t *testing.T) {
+	root := t.TempDir()
+
+	yamlDir := filepath.Join(root, "yaml-recipe")
+	if err := os.MkdirAll(filepath.Join(yamlDir, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(yamlDir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(yamlDir, "app", "source.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(yamlDir, "app", "output.txt"), []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeManifest(t, yamlDir, `schema: holon/v0
+kind: composite
+build:
+  runner: recipe
+  defaults:
+    target: macos
+    mode: debug
+  members:
+    - id: child
+      path: child
+      type: holon
+    - id: app
+      path: app
+      type: component
+  targets:
+    macos:
+      steps:
+        - build_member: child
+        - exec:
+            cwd: app
+            argv: ["echo", "hello"]
+        - copy:
+            from: app/source.txt
+            to: app/copied.txt
+        - assert_file:
+            path: app/output.txt
+artifacts:
+  primary: app/output.txt
+`)
+
+	protoDir := filepath.Join(root, "proto-recipe")
+	if err := os.MkdirAll(filepath.Join(protoDir, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(protoDir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(protoDir, "app", "source.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(protoDir, "app", "output.txt"), []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeProtoRecipeManifest(t, root, protoDir, `
+  description: "Proto-backed composite recipe."
+  kind: "composite"
+  build: {
+    runner: "recipe"
+    defaults: {
+      target: "macos"
+      mode: "debug"
+    }
+    members: {
+      id: "child"
+      path: "child"
+      type: "holon"
+    }
+    members: {
+      id: "app"
+      path: "app"
+      type: "component"
+    }
+    targets: {
+      key: "macos"
+      value: {
+        steps: { build_member: "child" }
+        steps: { exec: { cwd: "app" argv: ["echo", "hello"] } }
+        steps: { copy: { from: "app/source.txt" to: "app/copied.txt" } }
+        steps: { assert_file: { path: "app/output.txt" } }
+      }
+    }
+  }
+  artifacts: {
+    primary: "app/output.txt"
+  }
+`)
+
+	yamlManifest, err := LoadManifest(yamlDir)
+	if err != nil {
+		t.Fatalf("LoadManifest(yaml) failed: %v", err)
+	}
+	protoManifest, err := LoadManifest(protoDir)
+	if err != nil {
+		t.Fatalf("LoadManifest(proto) failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(protoManifest.Manifest.Build, yamlManifest.Manifest.Build) {
+		t.Fatalf("proto build = %#v, want %#v", protoManifest.Manifest.Build, yamlManifest.Manifest.Build)
+	}
+}
+
+func TestLoadManifestNormalizesProtoBackedDarwinRecipeTargets(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "proto-darwin-recipe")
+	if err := os.MkdirAll(filepath.Join(dir, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeProtoRecipeManifest(t, root, dir, `
+  kind: "composite"
+  build: {
+    runner: "recipe"
+    defaults: {
+      target: "DARWIN"
+      mode: "DEBUG"
+    }
+    members: {
+      id: "work"
+      path: "work"
+      type: "component"
+    }
+    targets: {
+      key: "darwin"
+      value: {
+        steps: {
+          exec: {
+            cwd: "work"
+            argv: ["echo", "hello"]
+          }
+        }
+      }
+    }
+  }
+  artifacts: {
+    primary: "work/app-debug"
+  }
+`)
+
+	loaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+	if got := loaded.Manifest.Build.Defaults.Target; got != "macos" {
+		t.Fatalf("defaults.target = %q, want %q", got, "macos")
+	}
+	if got := loaded.Manifest.Build.Defaults.Mode; got != "debug" {
+		t.Fatalf("defaults.mode = %q, want %q", got, "debug")
+	}
+	if _, ok := loaded.Manifest.Build.Targets["macos"]; !ok {
+		t.Fatalf("expected normalized macos target, got %v", loaded.Manifest.Build.Targets)
+	}
+}
+
+func TestProtoRecipeValidationRejectsMissingMembers(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "proto-invalid-recipe")
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeProtoRecipeManifest(t, root, dir, `
+  kind: "composite"
+  build: {
+    runner: "recipe"
+    targets: {
+      key: "macos"
+      value: {
+        steps: {
+          assert_file: {
+            path: "app/demo.app"
+          }
+        }
+      }
+    }
+  }
+  artifacts: {
+    primary: "app/demo.app"
+  }
+`)
+
+	_, err := LoadManifest(dir)
+	if err == nil {
+		t.Fatal("expected error for missing proto recipe members")
+	}
+	if !strings.Contains(err.Error(), "recipe runner requires at least one member") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteLifecycleBuildProtoBackedRecipe(t *testing.T) {
+	if _, err := execLookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+	dir := filepath.Join(root, "proto-build-recipe")
+	if err := os.MkdirAll(filepath.Join(dir, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app", "output.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	target := canonicalRuntimeTarget()
+	writeProtoRecipeManifest(t, root, dir, fmt.Sprintf(`
+  kind: "composite"
+  build: {
+    runner: "recipe"
+    defaults: {
+      target: %q
+      mode: "debug"
+    }
+    members: {
+      id: "app"
+      path: "app"
+      type: "component"
+    }
+    targets: {
+      key: %q
+      value: {
+        steps: {
+          exec: {
+            cwd: "app"
+            argv: ["go", "version"]
+          }
+        }
+        steps: {
+          assert_file: {
+            path: "app/output.txt"
+          }
+        }
+      }
+    }
+  }
+  requires: {
+    commands: ["go"]
+  }
+  artifacts: {
+    primary: "app/output.txt"
+  }
+`, target, target))
+
+	report, err := ExecuteLifecycle(OperationBuild, dir)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	if report.Runner != RunnerRecipe {
+		t.Fatalf("runner = %q, want %q", report.Runner, RunnerRecipe)
+	}
+	if !strings.HasSuffix(report.Manifest, filepath.ToSlash(filepath.Join("proto-build-recipe", "v1", "holon.proto"))) {
+		t.Fatalf("manifest report = %q", report.Manifest)
+	}
+	if !hasEntryContaining(report.Commands, "go version") {
+		t.Fatalf("expected go version command in report, got %v", report.Commands)
+	}
+	if !hasEntryContaining(report.Commands, "assert_file") {
+		t.Fatalf("expected assert_file step in report, got %v", report.Commands)
 	}
 }
 

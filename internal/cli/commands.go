@@ -135,7 +135,7 @@ OP commands:
   op build [<holon-or-path>] [flags]     build a holon artifact via its runner
   op test [<holon-or-path>]              run a holon's test contract
   op clean [<holon-or-path>]             remove .op/ build outputs
-  op install [<holon-or-path>] [flags]   install a built artifact into $OPBIN
+  op install [<holon-or-path>] [flags]   build and install an artifact into $OPBIN
   op uninstall <holon>                   remove an installed artifact from $OPBIN
   op mod <command>                       manage holon.mod and holon.sum
   op env [--init] [--shell]              print resolved OPPATH / OPBIN / ROOT
@@ -147,7 +147,7 @@ Build flags:
   --no-sign                                    skip automatic ad-hoc signing for bundle artifacts
 
 Install flags:
-  --no-build                                   fail if the artifact is missing instead of building
+  --no-build                                   skip the build and install the current artifact as-is
   --link-applications                          symlink installed .app bundles into /Applications (macOS only)
 
 Run flags:

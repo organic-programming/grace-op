@@ -331,10 +331,7 @@ func manifestFromResolved(resolved *identity.Resolved) Manifest {
 		Kind:         resolved.Kind,
 		Transport:    resolved.Transport,
 		Platforms:    slices.Clone(resolved.Platforms),
-		Build: BuildConfig{
-			Runner: resolved.BuildRunner,
-			Main:   resolved.BuildMain,
-		},
+		Build:        manifestBuildFromResolved(resolved),
 		Requires: Requires{
 			Commands: slices.Clone(resolved.RequiredCommands),
 			Files:    slices.Clone(resolved.RequiredFiles),
@@ -347,6 +344,64 @@ func manifestFromResolved(resolved *identity.Resolved) Manifest {
 			Primary: resolved.PrimaryArtifact,
 		},
 	}
+}
+
+func manifestBuildFromResolved(resolved *identity.Resolved) BuildConfig {
+	build := BuildConfig{
+		Runner: resolved.BuildRunner,
+		Main:   resolved.BuildMain,
+	}
+
+	if resolved.BuildDefaults != nil {
+		build.Defaults = &RecipeDefaults{
+			Target: strings.TrimSpace(resolved.BuildDefaults.Target),
+			Mode:   strings.TrimSpace(resolved.BuildDefaults.Mode),
+		}
+	}
+
+	if len(resolved.BuildMembers) > 0 {
+		build.Members = make([]RecipeMember, 0, len(resolved.BuildMembers))
+		for _, member := range resolved.BuildMembers {
+			build.Members = append(build.Members, RecipeMember{
+				ID:   strings.TrimSpace(member.ID),
+				Path: strings.TrimSpace(member.Path),
+				Type: strings.TrimSpace(member.Type),
+			})
+		}
+	}
+
+	if len(resolved.BuildTargets) > 0 {
+		build.Targets = make(map[string]RecipeTarget, len(resolved.BuildTargets))
+		for name, target := range resolved.BuildTargets {
+			steps := make([]RecipeStep, 0, len(target.Steps))
+			for _, step := range target.Steps {
+				recipeStep := RecipeStep{
+					BuildMember: strings.TrimSpace(step.BuildMember),
+				}
+				if step.Exec != nil {
+					recipeStep.Exec = &RecipeStepExec{
+						Cwd:  strings.TrimSpace(step.Exec.Cwd),
+						Argv: append([]string(nil), step.Exec.Argv...),
+					}
+				}
+				if step.Copy != nil {
+					recipeStep.Copy = &RecipeStepCopy{
+						From: strings.TrimSpace(step.Copy.From),
+						To:   strings.TrimSpace(step.Copy.To),
+					}
+				}
+				if step.AssertFile != nil {
+					recipeStep.AssertFile = &RecipeStepFile{
+						Path: strings.TrimSpace(step.AssertFile.Path),
+					}
+				}
+				steps = append(steps, recipeStep)
+			}
+			build.Targets[strings.TrimSpace(name)] = RecipeTarget{Steps: steps}
+		}
+	}
+
+	return build
 }
 
 func manifestSkillsFromResolved(skills []identity.ResolvedSkill) []Skill {
