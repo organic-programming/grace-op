@@ -116,6 +116,25 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 	}
 
 	installedPath := filepath.Join(openv.OPBIN(), installName)
+
+	// Self-install: when the artifact binary is "op", install just the
+	// binary into OPBIN instead of the whole .holon package directory.
+	// This keeps op as a standalone executable — par dérogation.
+	if isSelfInstall(target.Manifest) {
+		binaryPath := target.Manifest.BinaryPath()
+		if binaryPath == "" {
+			return report, fmt.Errorf("op binary not found after build")
+		}
+		installedPath = filepath.Join(openv.OPBIN(), target.Manifest.BinaryName())
+		reporter.Step("copying to " + installedPath + "...")
+		if err := copyFile(binaryPath, installedPath); err != nil {
+			return report, fmt.Errorf("install %s: %w", installName, err)
+		}
+		report.Installed = installedPath
+		report.Notes = append(report.Notes, "installed into "+installedPath)
+		return report, nil
+	}
+
 	reporter.Step("copying to " + installedPath + "...")
 	if err := copyArtifact(artifactPath, installedPath); err != nil {
 		return report, fmt.Errorf("install %s: %w", installName, err)
@@ -284,4 +303,10 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return nil
+}
+
+// isSelfInstall returns true when the holon being installed is op itself.
+// In that case, only the binary is installed (no .holon package directory).
+func isSelfInstall(manifest *LoadedManifest) bool {
+	return manifest != nil && manifest.BinaryName() == "op"
 }

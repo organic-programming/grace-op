@@ -43,6 +43,7 @@ type Manifest struct {
 	Clade       string
 	Status      string
 	Born        string
+	Version     string
 	Lang        string
 	Aliases     []string
 	ProtoStatus string
@@ -295,6 +296,7 @@ func manifestFromResolved(resolved *identity.Resolved) Manifest {
 		Clade:        resolved.Identity.Clade,
 		Status:       resolved.Identity.Status,
 		Born:         resolved.Identity.Born,
+		Version:      resolved.Identity.Version,
 		Lang:         resolved.Identity.Lang,
 		ProtoStatus:  resolved.Identity.ProtoStatus,
 		Parents:      slices.Clone(resolved.Identity.Parents),

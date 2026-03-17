@@ -17,12 +17,12 @@ func TestRunCLIVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	code := api.RunCLIWithVersion([]string{"version"}, "v0.5.0-test", &stdout, &stderr)
+	code := api.RunCLIWithVersion([]string{"version"}, "0.1.0-test", &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("RunCLIWithVersion returned %d, want 0", code)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "op v0.5.0-test" {
-		t.Fatalf("version output = %q, want %q", got, "op v0.5.0-test")
+	if got := strings.TrimSpace(stdout.String()); got != "op 0.1.0-test" {
+		t.Fatalf("version output = %q, want %q", got, "op 0.1.0-test")
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())

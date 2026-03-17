@@ -289,6 +289,7 @@ func resolvedFromDynamic(manifest *dynamic.Message) *Resolved {
 		resolved.Identity.Composer = dynString(ident, 6)
 		resolved.Identity.Status = dynString(ident, 8)
 		resolved.Identity.Born = dynString(ident, 9)
+		resolved.Identity.Version = dynString(ident, 10)
 		resolved.Identity.Aliases = dynStringSlice(ident, 11)
 	}
 

@@ -22,6 +22,7 @@ type Identity struct {
 	Clade      string
 	Status     string
 	Born       string
+	Version    string
 
 	// Lineage
 	Parents      []string

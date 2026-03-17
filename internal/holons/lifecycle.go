@@ -338,7 +338,14 @@ func (goModuleRunner) build(manifest *LoadedManifest, ctx BuildContext, report *
 	}
 
 	binaryPath := manifest.BinaryPath()
-	args := []string{"go", "build", "-o", binaryPath, manifest.GoMainPackage()}
+	args := []string{"go", "build"}
+
+	// Inject the holon version from the proto into the binary via -ldflags.
+	if version := strings.TrimSpace(manifest.Manifest.Version); version != "" {
+		args = append(args, "-ldflags", "-X main.version="+version)
+	}
+
+	args = append(args, "-o", binaryPath, manifest.GoMainPackage())
 	report.Commands = append(report.Commands, commandString(args))
 	ctx.Progress.Step(commandString(args))
 	if ctx.DryRun {
