@@ -147,6 +147,23 @@ func syncDotnetArtifacts(manifest *LoadedManifest, outputDir string) error {
 	return nil
 }
 
+func syncGradleInstallDistSupport(manifest *LoadedManifest, launcherPath string) error {
+	if manifest == nil || manifestHasPrimaryArtifact(manifest) {
+		return nil
+	}
+	if strings.TrimSpace(launcherPath) == "" {
+		return nil
+	}
+
+	installRoot := filepath.Dir(filepath.Dir(launcherPath))
+	libDir := filepath.Join(installRoot, "lib")
+	if !dirExists(libDir) {
+		return nil
+	}
+
+	return copyArtifact(libDir, filepath.Join(manifest.HolonPackageDir(), "bin", "lib"))
+}
+
 func writeDotnetLauncher(path string, dllName string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -198,6 +215,31 @@ func pythonInterpreter() (string, error) {
 	return interpreter, nil
 }
 
+func pythonProjectInterpreterPath(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	for _, rel := range []string{
+		filepath.Join(".venv", "bin", "python"),
+		filepath.Join(".venv", "bin", "python3"),
+		filepath.Join("venv", "bin", "python"),
+		filepath.Join("venv", "bin", "python3"),
+	} {
+		candidate := filepath.Join(manifest.Dir, rel)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func pythonInterpreterForManifest(manifest *LoadedManifest) (string, error) {
+	if local := pythonProjectInterpreterPath(manifest); local != "" {
+		return local, nil
+	}
+	return pythonInterpreter()
+}
+
 func pythonInterpreterPath() (string, error) {
 	for _, candidate := range []string{"python3", "python"} {
 		resolved, err := exec.LookPath(candidate)
@@ -216,8 +258,15 @@ func pythonInterpreterPath() (string, error) {
 	return "", fmt.Errorf("python runner requires python3 or python on PATH")
 }
 
+func pythonInterpreterPathForManifest(manifest *LoadedManifest) (string, error) {
+	if local := pythonProjectInterpreterPath(manifest); local != "" {
+		return local, nil
+	}
+	return pythonInterpreterPath()
+}
+
 func pythonBuildArgs(manifest *LoadedManifest) ([]string, bool, error) {
-	interpreter, err := pythonInterpreter()
+	interpreter, err := pythonInterpreterForManifest(manifest)
 	if err != nil {
 		return nil, false, err
 	}
@@ -243,7 +292,7 @@ func pythonEntrypoint(manifest *LoadedManifest) (string, error) {
 }
 
 func pythonTestArgs(manifest *LoadedManifest) ([]string, error) {
-	interpreter, err := pythonInterpreter()
+	interpreter, err := pythonInterpreterForManifest(manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -271,12 +320,128 @@ func dartEntrypoint(manifest *LoadedManifest) (string, error) {
 	return "", fmt.Errorf("dart runner requires bin/main.dart or lib/main.dart")
 }
 
+func executableFile(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
+}
+
+func rubyToolchainPaths() (string, string, error) {
+	type candidate struct {
+		rubyPath   string
+		bundlePath string
+	}
+
+	addCandidate := func(dst *[]candidate, rubyPath string, bundlePath string) {
+		rubyPath = strings.TrimSpace(rubyPath)
+		bundlePath = strings.TrimSpace(bundlePath)
+		if rubyPath == "" {
+			return
+		}
+		if !executableFile(rubyPath) {
+			return
+		}
+		if bundlePath == "" {
+			bundlePath = filepath.Join(filepath.Dir(rubyPath), "bundle")
+		}
+		if !executableFile(bundlePath) {
+			return
+		}
+		*dst = append(*dst, candidate{rubyPath: rubyPath, bundlePath: bundlePath})
+	}
+
+	var candidates []candidate
+	if rubyPath, err := exec.LookPath("ruby"); err == nil && rubyPath != "" && rubyPath != "/usr/bin/ruby" {
+		bundlePath, _ := exec.LookPath("bundle")
+		addCandidate(&candidates, rubyPath, bundlePath)
+	}
+
+	if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+		for _, base := range []string{
+			filepath.Join(homeDir, ".rbenv", "shims"),
+			filepath.Join(homeDir, ".asdf", "shims"),
+			filepath.Join(homeDir, ".mise", "shims"),
+		} {
+			addCandidate(&candidates, filepath.Join(base, "ruby"), filepath.Join(base, "bundle"))
+		}
+	}
+
+	for _, base := range []string{
+		"/opt/homebrew/opt/ruby/bin",
+		"/usr/local/opt/ruby/bin",
+	} {
+		addCandidate(&candidates, filepath.Join(base, "ruby"), filepath.Join(base, "bundle"))
+	}
+
+	for _, pattern := range []string{
+		"/opt/homebrew/Cellar/ruby/*/bin/ruby",
+		"/usr/local/Cellar/ruby/*/bin/ruby",
+		"/opt/homebrew/Library/Homebrew/vendor/portable-ruby/*/bin/ruby",
+		"/usr/local/Homebrew/Library/Homebrew/vendor/portable-ruby/*/bin/ruby",
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(matches)))
+		for _, rubyPath := range matches {
+			addCandidate(&candidates, rubyPath, filepath.Join(filepath.Dir(rubyPath), "bundle"))
+		}
+	}
+
+	if rubyPath, err := exec.LookPath("ruby"); err == nil {
+		bundlePath, _ := exec.LookPath("bundle")
+		addCandidate(&candidates, rubyPath, bundlePath)
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		key := candidate.rubyPath + "\x00" + candidate.bundlePath
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		return candidate.rubyPath, candidate.bundlePath, nil
+	}
+
+	return "", "", fmt.Errorf("ruby runner requires ruby and bundle (PATH or a local toolchain)")
+}
+
+func rubyGemPath(rubyPath string) string {
+	candidate := filepath.Join(filepath.Dir(rubyPath), "gem")
+	if executableFile(candidate) {
+		return candidate
+	}
+	return "gem"
+}
+
+func rubyBase64LibPath(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	matches, err := filepath.Glob(filepath.Join(manifest.Dir, ".op", "base64", "gems", "base64-*", "lib"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	sort.Strings(matches)
+	return matches[len(matches)-1]
+}
+
 func rubyTestArgs(manifest *LoadedManifest) ([]string, error) {
+	_, bundlePath, err := rubyToolchainPaths()
+	if err != nil {
+		return nil, err
+	}
 	if dirExists(filepath.Join(manifest.Dir, "spec")) {
-		return []string{"bundle", "exec", "rspec"}, nil
+		return []string{bundlePath, "exec", "rspec"}, nil
 	}
 	if fileExists(filepath.Join(manifest.Dir, "Rakefile")) {
-		return []string{"bundle", "exec", "rake", "test"}, nil
+		return []string{bundlePath, "exec", "rake", "test"}, nil
 	}
 	return nil, fmt.Errorf("ruby runner requires spec/ or Rakefile")
 }
@@ -445,9 +610,8 @@ func (pythonRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Re
 		return err
 	}
 	wrapper := fmt.Sprintf(
-		"#!/bin/sh\nset -eu\ncd %q\nexec %q %q \"$@\"\n",
-		manifest.Dir,
-		argsOrDefaultPythonPath(),
+		"#!/bin/sh\nset -eu\nexec %q %q \"$@\"\n",
+		argsOrDefaultPythonPathForManifest(manifest),
 		filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)),
 	)
 	if err := os.WriteFile(manifest.BinaryPath(), []byte(wrapper), 0o755); err != nil {
@@ -467,6 +631,14 @@ func argsOrDefaultPython() string {
 
 func argsOrDefaultPythonPath() string {
 	interpreter, err := pythonInterpreterPath()
+	if err != nil {
+		return argsOrDefaultPython()
+	}
+	return interpreter
+}
+
+func argsOrDefaultPythonPathForManifest(manifest *LoadedManifest) string {
+	interpreter, err := pythonInterpreterPathForManifest(manifest)
 	if err != nil {
 		return argsOrDefaultPython()
 	}
@@ -609,28 +781,42 @@ func (dartRunner) clean(manifest *LoadedManifest, report *Report) error {
 type rubyRunner struct{}
 
 func (rubyRunner) check(manifest *LoadedManifest, _ BuildContext) error {
-	if err := requireRunnerCommands("ruby", "bundle"); err != nil {
-		return err
-	}
 	if !fileExists(filepath.Join(manifest.Dir, "Gemfile")) {
 		return fmt.Errorf("ruby runner requires Gemfile")
 	}
-	return nil
+	_, _, err := rubyToolchainPaths()
+	return err
 }
 
 func (rubyRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
 	if err := ensureHostBuildTarget(RunnerRuby, ctx); err != nil {
 		return err
 	}
+	rubyPath, bundlePath, err := rubyToolchainPaths()
+	if err != nil {
+		return err
+	}
+	gemPath := rubyGemPath(rubyPath)
 
-	args := []string{"bundle", "install"}
-	report.Commands = append(report.Commands, commandString(args))
-	ctx.Progress.Step(commandString(args))
+	_ = os.RemoveAll(filepath.Join(manifest.Dir, "vendor", "bundle"))
+
+	commands := [][]string{
+		{"env", "BUNDLE_FORCE_RUBY_PLATFORM=true", bundlePath, "lock", "--add-platform", "arm64-darwin"},
+		{bundlePath, "config", "set", "--local", "path", ".op/bundle"},
+		{"env", "BUNDLE_FORCE_RUBY_PLATFORM=true", bundlePath, "install"},
+		{gemPath, "install", "base64", "--install-dir", ".op/base64", "--no-document"},
+	}
+	for _, args := range commands {
+		report.Commands = append(report.Commands, commandString(args))
+		ctx.Progress.Step(commandString(args))
+	}
 	if ctx.DryRun {
 		return nil
 	}
-	if output, err := runCommand(manifest.Dir, args); err != nil {
-		return fmt.Errorf("%s\n%s", err, output)
+	for _, args := range commands {
+		if output, err := runCommand(manifest.Dir, args); err != nil {
+			return fmt.Errorf("%s\n%s", err, output)
+		}
 	}
 	if manifestHasPrimaryArtifact(manifest) {
 		report.Notes = append(report.Notes, "bundle install complete")
@@ -644,7 +830,19 @@ func (rubyRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Repo
 	if err := os.MkdirAll(filepath.Dir(manifest.BinaryPath()), 0o755); err != nil {
 		return err
 	}
-	wrapper := fmt.Sprintf("#!/bin/sh\nset -eu\ncd %q\nexec bundle exec ruby %q \"$@\"\n", manifest.Dir, filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)))
+	rubyLibExport := ""
+	if base64Lib := rubyBase64LibPath(manifest); base64Lib != "" {
+		rubyLibExport = fmt.Sprintf("export RUBYLIB=%q${RUBYLIB:+:$RUBYLIB}\n", base64Lib)
+	}
+	wrapper := fmt.Sprintf(
+		"#!/bin/sh\nset -eu\nexport BUNDLE_GEMFILE=%q\nexport BUNDLE_PATH=%q\nexport BUNDLE_DISABLE_SHARED_GEMS=true\nexport BUNDLE_FORCE_RUBY_PLATFORM=true\n%sexec %q exec %q %q \"$@\"\n",
+		filepath.Join(manifest.Dir, "Gemfile"),
+		filepath.Join(manifest.Dir, ".op", "bundle"),
+		rubyLibExport,
+		bundlePath,
+		rubyPath,
+		filepath.Join(manifest.Dir, filepath.FromSlash(entrypoint)),
+	)
 	if err := os.WriteFile(manifest.BinaryPath(), []byte(wrapper), 0o755); err != nil {
 		return err
 	}
@@ -671,13 +869,13 @@ func (rubyRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Repor
 }
 
 func (rubyRunner) clean(manifest *LoadedManifest, report *Report) error {
-	if err := removeSelectedPaths(manifest.Dir, "log", "tmp", filepath.Join("vendor", "bundle")); err != nil {
+	if err := removeSelectedPaths(manifest.Dir, "log", "tmp", ".bundle", filepath.Join("vendor", "bundle")); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}
-	report.Notes = append(report.Notes, "removed log/, tmp/, vendor/bundle/, and .op/")
+	report.Notes = append(report.Notes, "removed log/, tmp/, .bundle/, vendor/bundle/, and .op/")
 	return nil
 }
 
@@ -936,9 +1134,16 @@ func (npmRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Repor
 	if err := os.MkdirAll(filepath.Dir(manifest.BinaryPath()), 0o755); err != nil {
 		return err
 	}
+	descriptorSeed := ""
+	if descriptorProto := nodeDescriptorProtoSource(manifest); descriptorProto != "" {
+		descriptorSeed = fmt.Sprintf(
+			"descriptor_src=%q\ndescriptor_dst=\"$(pwd)/protos/holons/v1/google/protobuf/descriptor.proto\"\nif [ -f \"$descriptor_src\" ] && [ ! -f \"$descriptor_dst\" ]; then\n  mkdir -p \"$(dirname \"$descriptor_dst\")\"\n  cp \"$descriptor_src\" \"$descriptor_dst\"\nfi\n",
+			descriptorProto,
+		)
+	}
 	wrapper := fmt.Sprintf(
-		"#!/bin/sh\nset -eu\ncd %q\nexec %q %q \"$@\"\n",
-		manifest.Dir,
+		"#!/bin/sh\nset -eu\n%sexec %q %q \"$@\"\n",
+		descriptorSeed,
 		argsOrDefaultNodePath(),
 		candidate,
 	)
@@ -977,17 +1182,35 @@ func (npmRunner) clean(manifest *LoadedManifest, report *Report) error {
 
 func npmArtifactCandidates(manifest *LoadedManifest) []string {
 	name := manifest.BinaryName()
-	candidates := []string{
+	var candidates []string
+	// Prefer the explicit entrypoint declared in build.main.
+	if rel := strings.TrimPrefix(strings.TrimSpace(manifest.Manifest.Build.Main), "./"); rel != "" {
+		if fileExists(filepath.Join(manifest.Dir, filepath.FromSlash(rel))) {
+			candidates = append(candidates, filepath.Join(manifest.Dir, filepath.FromSlash(rel)))
+		}
+	}
+	candidates = append(candidates,
 		filepath.Join(manifest.Dir, "dist", name),
 		filepath.Join(manifest.Dir, "dist", name+".js"),
 		filepath.Join(manifest.Dir, "build", name),
 		filepath.Join(manifest.Dir, "build", name+".js"),
-	}
-	// Allow interpreted holons (no build step) to declare their entry point via build.main.
-	if main := strings.TrimSpace(manifest.Manifest.Build.Main); main != "" {
-		candidates = append(candidates, filepath.Join(manifest.Dir, filepath.FromSlash(main)))
-	}
+	)
 	return candidates
+}
+
+func nodeDescriptorProtoSource(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	for _, candidate := range []string{
+		filepath.Join(manifest.Dir, "node_modules", "protobufjs", "google", "protobuf", "descriptor.proto"),
+		filepath.Join(manifest.Dir, "node_modules", "grpc-tools", "bin", "google", "protobuf", "descriptor.proto"),
+	} {
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // npmHasBuildScript reports whether the holon's package.json declares a "build" script.
@@ -1032,10 +1255,20 @@ func (gradleRunner) build(manifest *LoadedManifest, ctx BuildContext, report *Re
 	if output, err := runCommand(manifest.Dir, args); err != nil {
 		return fmt.Errorf("%s\n%s", err, output)
 	}
-	if err := syncBinaryFromCandidates(manifest, gradleArtifactCandidates(manifest)); err != nil {
+	launcherPath := firstExistingArtifactCandidate(gradleArtifactCandidates(manifest))
+	if launcherPath == "" {
+		return missingBinaryFromCandidates(manifest, gradleArtifactCandidates(manifest))
+	}
+	if err := syncBinaryArtifact(manifest, launcherPath); err != nil {
+		return err
+	}
+	if err := syncGradleInstallDistSupport(manifest, launcherPath); err != nil {
 		return err
 	}
 	report.Notes = append(report.Notes, "gradle build complete")
+	if dirExists(filepath.Join(filepath.Dir(filepath.Dir(launcherPath)), "lib")) {
+		report.Notes = append(report.Notes, "gradle runtime libraries copied into package")
+	}
 	return nil
 }
 
