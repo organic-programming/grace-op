@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -123,6 +125,23 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		report.Notes = append(report.Notes, "manifest and prerequisites validated")
 		return report, nil
 	case OperationBuild:
+		// Auto-increment patch version in the proto before build.
+		// On failure the original version is restored; on success it sticks.
+		if !ctx.DryRun {
+			keepVersion, restoreVersion, patchErr := autoIncrementPatch(target.Manifest, reporter)
+			if patchErr != nil {
+				err = fmt.Errorf("version increment: %w", patchErr)
+				break
+			}
+			defer func() {
+				if err != nil {
+					restoreVersion()
+				} else {
+					keepVersion()
+				}
+			}()
+		}
+
 		restoreFn, tmplErr := processTemplates(target.Manifest, reporter)
 		if tmplErr != nil {
 			err = fmt.Errorf("template processing: %w", tmplErr)
@@ -343,6 +362,65 @@ func processTemplates(manifest *LoadedManifest, reporter progress.Reporter) (res
 	}
 
 	return restore, nil
+}
+
+var versionLineRe = regexp.MustCompile(`(version:\s*")([0-9]+\.[0-9]+\.[0-9]+)(")`)
+
+// autoIncrementPatch bumps the patch component of identity.version in the proto
+// file and updates the in-memory manifest. Returns two closures:
+//   - keep: no-op (the bumped proto stays as-is)
+//   - restore: writes back the original proto bytes
+func autoIncrementPatch(manifest *LoadedManifest, reporter progress.Reporter) (keep, restore func(), err error) {
+	protoPath := manifest.Path
+	original, readErr := os.ReadFile(protoPath)
+	if readErr != nil {
+		return nil, nil, fmt.Errorf("read proto: %w", readErr)
+	}
+
+	info, statErr := os.Stat(protoPath)
+	if statErr != nil {
+		return nil, nil, fmt.Errorf("stat proto: %w", statErr)
+	}
+
+	oldVersion := strings.TrimSpace(manifest.Manifest.Version)
+	parts := strings.SplitN(oldVersion, ".", 3)
+	if len(parts) != 3 {
+		// No valid semver — skip auto-patch silently.
+		return func() {}, func() {}, nil
+	}
+
+	patch, convErr := strconv.Atoi(parts[2])
+	if convErr != nil {
+		return func() {}, func() {}, nil
+	}
+
+	newVersion := parts[0] + "." + parts[1] + "." + strconv.Itoa(patch+1)
+
+	// Replace the first occurrence of the version in the proto text.
+	updated := versionLineRe.ReplaceAllFunc(original, func(match []byte) []byte {
+		subs := versionLineRe.FindSubmatch(match)
+		if string(subs[2]) == oldVersion {
+			return append(append(subs[1], []byte(newVersion)...), subs[3]...)
+		}
+		return match
+	})
+
+	if err := os.WriteFile(protoPath, updated, info.Mode()); err != nil {
+		return nil, nil, fmt.Errorf("write proto: %w", err)
+	}
+
+	// Update in-memory manifest so templates pick up the new version.
+	manifest.Manifest.Version = newVersion
+
+	reporter.Step(fmt.Sprintf("version: %s → %s", oldVersion, newVersion))
+
+	restore = func() {
+		_ = os.WriteFile(protoPath, original, info.Mode())
+		manifest.Manifest.Version = oldVersion
+	}
+	keep = func() {} // new version stays in the proto
+
+	return keep, restore, nil
 }
 
 func requiredCommands(manifest *LoadedManifest) []string {
