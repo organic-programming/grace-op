@@ -539,7 +539,8 @@ func collectProtoFiles(dir string) ([]string, error) {
 		if entry.IsDir() {
 			name := entry.Name()
 			if (strings.HasPrefix(name, ".") && path != dir) ||
-				name == "node_modules" || name == "vendor" || name == "gen" {
+				name == "node_modules" || name == "vendor" || name == "gen" ||
+				name == "build" || name == "testdata" {
 				return filepath.SkipDir
 			}
 			return nil
