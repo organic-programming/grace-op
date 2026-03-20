@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	"github.com/organic-programming/grace-op/internal/identity"
 	"google.golang.org/grpc"
 )
@@ -149,26 +149,31 @@ func TestInspectCommandProtoBackedHolonJSON(t *testing.T) {
 }
 
 func TestInspectCommandHostPortFallback(t *testing.T) {
-	address := startDescribeServer(t, &holonmetav1.DescribeResponse{
-		Slug:  "echo-server",
-		Motto: "Echo what you send.",
-		Services: []*holonmetav1.ServiceDoc{
+	address := startDescribeServer(t, &holonsv1.DescribeResponse{
+		Manifest: &holonsv1.HolonManifest{
+			Identity: &holonsv1.HolonManifest_Identity{
+				GivenName:  "Echo",
+				FamilyName: "Server",
+				Motto:      "Echo what you send.",
+			},
+		},
+		Services: []*holonsv1.ServiceDoc{
 			{
 				Name:        "echo.v1.EchoService",
 				Description: "Echoes request payloads.",
-				Methods: []*holonmetav1.MethodDoc{
+				Methods: []*holonsv1.MethodDoc{
 					{
 						Name:        "Ping",
 						Description: "Reply with the same text.",
 						InputType:   "echo.v1.PingRequest",
 						OutputType:  "echo.v1.PingResponse",
-						InputFields: []*holonmetav1.FieldDoc{
+						InputFields: []*holonsv1.FieldDoc{
 							{
 								Name:        "text",
 								Type:        "string",
 								Number:      1,
 								Description: "Text to echo back.",
-								Label:       holonmetav1.FieldLabel_FIELD_LABEL_OPTIONAL,
+								Label:       holonsv1.FieldLabel_FIELD_LABEL_OPTIONAL,
 								Required:    true,
 								Example:     `"hello"`,
 							},
@@ -295,15 +300,15 @@ message BuildResponse {
 }
 
 type staticDescribeServer struct {
-	holonmetav1.UnimplementedHolonMetaServer
-	response *holonmetav1.DescribeResponse
+	holonsv1.UnimplementedHolonMetaServer
+	response *holonsv1.DescribeResponse
 }
 
-func (s staticDescribeServer) Describe(context.Context, *holonmetav1.DescribeRequest) (*holonmetav1.DescribeResponse, error) {
+func (s staticDescribeServer) Describe(context.Context, *holonsv1.DescribeRequest) (*holonsv1.DescribeResponse, error) {
 	return s.response, nil
 }
 
-func startDescribeServer(t *testing.T, response *holonmetav1.DescribeResponse) string {
+func startDescribeServer(t *testing.T, response *holonsv1.DescribeResponse) string {
 	t.Helper()
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -312,7 +317,7 @@ func startDescribeServer(t *testing.T, response *holonmetav1.DescribeResponse) s
 	}
 
 	server := grpc.NewServer()
-	holonmetav1.RegisterHolonMetaServer(server, staticDescribeServer{response: response})
+	holonsv1.RegisterHolonMetaServer(server, staticDescribeServer{response: response})
 	go func() {
 		_ = server.Serve(lis)
 	}()

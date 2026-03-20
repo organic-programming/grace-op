@@ -1,10 +1,14 @@
 package inspect
 
-import holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
+import (
+	"strings"
+
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
+)
 
 // FromDescribeResponse normalizes a HolonMeta.Describe response into the
 // offline inspection document shape used by op inspect.
-func FromDescribeResponse(response *holonmetav1.DescribeResponse) *Document {
+func FromDescribeResponse(response *holonsv1.DescribeResponse) *Document {
 	if response == nil {
 		return &Document{}
 	}
@@ -33,14 +37,47 @@ func FromDescribeResponse(response *holonmetav1.DescribeResponse) *Document {
 		})
 	}
 
+	manifest := response.GetManifest()
+	identity := manifest.GetIdentity()
+	skills := make([]Skill, 0, len(manifest.GetSkills()))
+	for _, skill := range manifest.GetSkills() {
+		skills = append(skills, Skill{
+			Name:        skill.GetName(),
+			Description: skill.GetDescription(),
+			When:        skill.GetWhen(),
+			Steps:       append([]string(nil), skill.GetSteps()...),
+		})
+	}
+
+	sequences := make([]Sequence, 0, len(manifest.GetSequences()))
+	for _, sequence := range manifest.GetSequences() {
+		params := make([]SequenceParam, 0, len(sequence.GetParams()))
+		for _, param := range sequence.GetParams() {
+			params = append(params, SequenceParam{
+				Name:        param.GetName(),
+				Description: param.GetDescription(),
+				Required:    param.GetRequired(),
+				Default:     param.GetDefault(),
+			})
+		}
+		sequences = append(sequences, Sequence{
+			Name:        sequence.GetName(),
+			Description: sequence.GetDescription(),
+			Params:      params,
+			Steps:       append([]string(nil), sequence.GetSteps()...),
+		})
+	}
+
 	return &Document{
-		Slug:     response.GetSlug(),
-		Motto:    response.GetMotto(),
-		Services: services,
+		Slug:      slugFromIdentity(identity.GetGivenName(), identity.GetFamilyName()),
+		Motto:     identity.GetMotto(),
+		Services:  services,
+		Skills:    skills,
+		Sequences: sequences,
 	}
 }
 
-func fromDescribeFields(fields []*holonmetav1.FieldDoc) []Field {
+func fromDescribeFields(fields []*holonsv1.FieldDoc) []Field {
 	out := make([]Field, 0, len(fields))
 	for _, field := range fields {
 		out = append(out, Field{
@@ -60,7 +97,7 @@ func fromDescribeFields(fields []*holonmetav1.FieldDoc) []Field {
 	return out
 }
 
-func fromDescribeEnumValues(values []*holonmetav1.EnumValueDoc) []EnumValue {
+func fromDescribeEnumValues(values []*holonsv1.EnumValueDoc) []EnumValue {
 	out := make([]EnumValue, 0, len(values))
 	for _, value := range values {
 		out = append(out, EnumValue{
@@ -72,15 +109,24 @@ func fromDescribeEnumValues(values []*holonmetav1.EnumValueDoc) []EnumValue {
 	return out
 }
 
-func describeFieldLabel(label holonmetav1.FieldLabel) string {
+func describeFieldLabel(label holonsv1.FieldLabel) string {
 	switch label {
-	case holonmetav1.FieldLabel_FIELD_LABEL_REPEATED:
+	case holonsv1.FieldLabel_FIELD_LABEL_REPEATED:
 		return FieldLabelRepeated
-	case holonmetav1.FieldLabel_FIELD_LABEL_MAP:
+	case holonsv1.FieldLabel_FIELD_LABEL_MAP:
 		return FieldLabelMap
-	case holonmetav1.FieldLabel_FIELD_LABEL_REQUIRED:
+	case holonsv1.FieldLabel_FIELD_LABEL_REQUIRED:
 		return FieldLabelRequired
 	default:
 		return FieldLabelOptional
 	}
+}
+
+func slugFromIdentity(givenName, familyName string) string {
+	given := strings.TrimSpace(givenName)
+	family := strings.TrimSpace(strings.TrimSuffix(familyName, "?"))
+	if given == "" && family == "" {
+		return ""
+	}
+	return strings.Trim(strings.ToLower(strings.ReplaceAll(given+"-"+family, " ", "-")), "-")
 }

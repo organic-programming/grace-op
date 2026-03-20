@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,7 +44,7 @@ type describeCatalog struct {
 
 type describeMethod struct {
 	serviceName string
-	methodDoc   *holonmetav1.MethodDoc
+	methodDoc   *holonsv1.MethodDoc
 	fullMethod  string
 
 	mu         sync.Mutex
@@ -148,8 +148,8 @@ func getDescribeCatalog(ctx context.Context, conn *grpc.ClientConn) (*describeCa
 }
 
 func fetchDescribeCatalog(ctx context.Context, conn *grpc.ClientConn) (*describeCatalog, error) {
-	client := holonmetav1.NewHolonMetaClient(conn)
-	response, err := client.Describe(ctx, &holonmetav1.DescribeRequest{})
+	client := holonsv1.NewHolonMetaClient(conn)
+	response, err := client.Describe(ctx, &holonsv1.DescribeRequest{})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
@@ -181,7 +181,7 @@ func describeUnavailable(err error) bool {
 		strings.Contains(lowered, "unimplemented")
 }
 
-func buildDescribeCatalog(response *holonmetav1.DescribeResponse) (*describeCatalog, error) {
+func buildDescribeCatalog(response *holonsv1.DescribeResponse) (*describeCatalog, error) {
 	catalog := &describeCatalog{
 		methods: make([]*describeMethod, 0),
 		byExact: make(map[string]*describeMethod),
@@ -293,7 +293,7 @@ func (m *describeMethod) descriptors() (protoreflect.MessageDescriptor, protoref
 	return inputDesc, outputDesc, err
 }
 
-func buildDescribeDescriptors(method *holonmetav1.MethodDoc) (protoreflect.MessageDescriptor, protoreflect.MessageDescriptor, error) {
+func buildDescribeDescriptors(method *holonsv1.MethodDoc) (protoreflect.MessageDescriptor, protoreflect.MessageDescriptor, error) {
 	builder := newSyntheticProtoBuilder()
 
 	inputDesc, inputSynthetic, err := builder.resolveRootMessage(method.GetInputType(), method.GetInputFields(), "Input")
@@ -380,7 +380,7 @@ type syntheticProtoBuilder struct {
 
 func newSyntheticProtoBuilder() *syntheticProtoBuilder {
 	return &syntheticProtoBuilder{
-		packageName:   "holonmeta.dynamic",
+		packageName:   "holons.dynamic",
 		externalFiles: make(map[string]*descriptorpb.FileDescriptorProto),
 		directDeps:    make(map[string]struct{}),
 		messageNames:  make(map[string]string),
@@ -388,8 +388,8 @@ func newSyntheticProtoBuilder() *syntheticProtoBuilder {
 		enumNames:     make(map[string]string),
 		enumDefs:      make(map[string]*descriptorpb.EnumDescriptorProto),
 		file: &descriptorpb.FileDescriptorProto{
-			Name:    proto.String("holonmeta/dynamic.proto"),
-			Package: proto.String("holonmeta.dynamic"),
+			Name:    proto.String("holons/dynamic.proto"),
+			Package: proto.String("holons.dynamic"),
 			Syntax:  proto.String("proto3"),
 		},
 	}
@@ -397,7 +397,7 @@ func newSyntheticProtoBuilder() *syntheticProtoBuilder {
 
 func (b *syntheticProtoBuilder) resolveRootMessage(
 	typeName string,
-	fields []*holonmetav1.FieldDoc,
+	fields []*holonsv1.FieldDoc,
 	localName string,
 ) (protoreflect.MessageDescriptor, string, error) {
 	if desc, ok, err := b.lookupExternalMessage(typeName); err != nil {
@@ -413,7 +413,7 @@ func (b *syntheticProtoBuilder) resolveRootMessage(
 	return nil, fullName, nil
 }
 
-func (b *syntheticProtoBuilder) ensureMessageType(typeName string, fields []*holonmetav1.FieldDoc, localName string) (string, error) {
+func (b *syntheticProtoBuilder) ensureMessageType(typeName string, fields []*holonsv1.FieldDoc, localName string) (string, error) {
 	key := messageKey(typeName, localName)
 	if fullName, ok := b.messageNames[key]; ok {
 		msg := b.messageDefs[key]
@@ -442,7 +442,7 @@ func (b *syntheticProtoBuilder) ensureMessageType(typeName string, fields []*hol
 	return fullName, nil
 }
 
-func (b *syntheticProtoBuilder) populateMessageFields(msg *descriptorpb.DescriptorProto, fields []*holonmetav1.FieldDoc) error {
+func (b *syntheticProtoBuilder) populateMessageFields(msg *descriptorpb.DescriptorProto, fields []*holonsv1.FieldDoc) error {
 	if msg == nil {
 		return errors.New("message descriptor is required")
 	}
@@ -462,7 +462,7 @@ func (b *syntheticProtoBuilder) populateMessageFields(msg *descriptorpb.Descript
 	return nil
 }
 
-func (b *syntheticProtoBuilder) buildFieldDescriptor(field *holonmetav1.FieldDoc) (*descriptorpb.FieldDescriptorProto, error) {
+func (b *syntheticProtoBuilder) buildFieldDescriptor(field *holonsv1.FieldDoc) (*descriptorpb.FieldDescriptorProto, error) {
 	if field == nil {
 		return nil, errors.New("field descriptor is required")
 	}
@@ -472,7 +472,7 @@ func (b *syntheticProtoBuilder) buildFieldDescriptor(field *holonmetav1.FieldDoc
 		Number: proto.Int32(field.GetNumber()),
 	}
 
-	if field.GetLabel() == holonmetav1.FieldLabel_FIELD_LABEL_MAP {
+	if field.GetLabel() == holonsv1.FieldLabel_FIELD_LABEL_MAP {
 		typeName, err := b.buildMapEntryDescriptor(field)
 		if err != nil {
 			return nil, err
@@ -483,7 +483,7 @@ func (b *syntheticProtoBuilder) buildFieldDescriptor(field *holonmetav1.FieldDoc
 		return fd, nil
 	}
 
-	if field.GetLabel() == holonmetav1.FieldLabel_FIELD_LABEL_REPEATED {
+	if field.GetLabel() == holonsv1.FieldLabel_FIELD_LABEL_REPEATED {
 		fd.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
 	} else {
 		fd.Label = descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum()
@@ -535,7 +535,7 @@ func (b *syntheticProtoBuilder) buildFieldDescriptor(field *holonmetav1.FieldDoc
 	return fd, nil
 }
 
-func (b *syntheticProtoBuilder) buildMapEntryDescriptor(field *holonmetav1.FieldDoc) (string, error) {
+func (b *syntheticProtoBuilder) buildMapEntryDescriptor(field *holonsv1.FieldDoc) (string, error) {
 	b.nextMapID++
 	localName := fmt.Sprintf("MapEntry%d", b.nextMapID)
 	fullName := "." + b.packageName + "." + localName
@@ -604,7 +604,7 @@ func (b *syntheticProtoBuilder) buildMapEntryDescriptor(field *holonmetav1.Field
 	return fullName, nil
 }
 
-func (b *syntheticProtoBuilder) ensureEnumType(typeName string, values []*holonmetav1.EnumValueDoc) (string, error) {
+func (b *syntheticProtoBuilder) ensureEnumType(typeName string, values []*holonsv1.EnumValueDoc) (string, error) {
 	key := typeKey(typeName)
 	if fullName, ok := b.enumNames[key]; ok {
 		enum := b.enumDefs[key]
@@ -632,7 +632,7 @@ func (b *syntheticProtoBuilder) ensureEnumType(typeName string, values []*holonm
 	return fullName, nil
 }
 
-func buildEnumValueDescriptors(values []*holonmetav1.EnumValueDoc) []*descriptorpb.EnumValueDescriptorProto {
+func buildEnumValueDescriptors(values []*holonsv1.EnumValueDoc) []*descriptorpb.EnumValueDescriptorProto {
 	descriptors := make([]*descriptorpb.EnumValueDescriptorProto, 0, len(values))
 	for _, value := range values {
 		if value == nil {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
-	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
 	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
 )
 
@@ -98,8 +98,8 @@ func inspectRemote(address string) (*inspectpkg.Document, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client := holonmetav1.NewHolonMetaClient(conn)
-	response, err := client.Describe(ctx, &holonmetav1.DescribeRequest{})
+	client := holonsv1.NewHolonMetaClient(conn)
+	response, err := client.Describe(ctx, &holonsv1.DescribeRequest{})
 	if err != nil {
 		return nil, err
 	}

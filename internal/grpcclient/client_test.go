@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	holonmetav1 "github.com/organic-programming/go-holons/gen/go/holonmeta/v1"
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -30,11 +30,11 @@ func (envServer) Env(_ context.Context, req *opv1.EnvRequest) (*opv1.EnvResponse
 }
 
 type staticDescribeServer struct {
-	holonmetav1.UnimplementedHolonMetaServer
-	response *holonmetav1.DescribeResponse
+	holonsv1.UnimplementedHolonMetaServer
+	response *holonsv1.DescribeResponse
 }
 
-func (s staticDescribeServer) Describe(context.Context, *holonmetav1.DescribeRequest) (*holonmetav1.DescribeResponse, error) {
+func (s staticDescribeServer) Describe(context.Context, *holonsv1.DescribeRequest) (*holonsv1.DescribeResponse, error) {
 	return s.response, nil
 }
 
@@ -113,22 +113,26 @@ func startTestGRPCServer(t *testing.T, withDescribe bool, withReflection bool) (
 	server := grpc.NewServer()
 	opv1.RegisterOPServiceServer(server, envServer{})
 	if withDescribe {
-		holonmetav1.RegisterHolonMetaServer(server, staticDescribeServer{
-			response: &holonmetav1.DescribeResponse{
-				Slug: "op",
-				Services: []*holonmetav1.ServiceDoc{
+		holonsv1.RegisterHolonMetaServer(server, staticDescribeServer{
+			response: &holonsv1.DescribeResponse{
+				Manifest: &holonsv1.HolonManifest{
+					Identity: &holonsv1.HolonManifest_Identity{
+						GivenName: "Op",
+					},
+				},
+				Services: []*holonsv1.ServiceDoc{
 					{
 						Name: "op.v1.OPService",
-						Methods: []*holonmetav1.MethodDoc{
+						Methods: []*holonsv1.MethodDoc{
 							{
 								Name:       "Env",
 								InputType:  "op.v1.EnvRequest",
 								OutputType: "op.v1.EnvResponse",
-								InputFields: []*holonmetav1.FieldDoc{
+								InputFields: []*holonsv1.FieldDoc{
 									{Name: "init", Type: "bool", Number: 1},
 									{Name: "shell", Type: "bool", Number: 2},
 								},
-								OutputFields: []*holonmetav1.FieldDoc{
+								OutputFields: []*holonsv1.FieldDoc{
 									{Name: "oppath", Type: "string", Number: 1},
 									{Name: "opbin", Type: "string", Number: 2},
 									{Name: "root", Type: "string", Number: 3},
