@@ -147,8 +147,8 @@ mechanism — identity-derived slugs, OPBIN entries, and PATH binaries
 are all suggested:
 
 ```
-op run gudule-<TAB>       →  gudule-greeting-godart, gudule-greeting-goswift, ...
-op build grace<TAB>       →  grace-op
+op run gabriel-<TAB>      →  gabriel-greeting-app-swiftui, gabriel-greeting-go, ...
+op build op<TAB>          →  grace-op (has an alias)
 op uninstall <TAB>        →  only installed holons from $OPBIN
 ```
 
@@ -156,9 +156,9 @@ op uninstall <TAB>        →  only installed holons from $OPBIN
 
 v0.5.0 — proto-first manifest, public `api/` CLI and code facets, thin gRPC server delegation, and Gabriel-style facet boundaries.
 
-## Design Drafts
+## Design
 
-- [OP_BUILD_SPEC.md](OP_BUILD_SPEC.md) — proposed contract for
+- [HOLON_BUILD.md](../../HOLON_BUILD.md) — proposed contract for
   manifest-driven `op build`, including composite holons and `recipe`
   orchestration.
 
