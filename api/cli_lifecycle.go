@@ -76,8 +76,8 @@ func (c cliState) runInstallCommand(format Format, quiet bool, args []string) in
 	)
 	for _, arg := range args {
 		switch arg {
-		case "--no-build":
-			req.NoBuild = true
+		case "--build":
+			req.Build = true
 		case "--link-applications":
 			req.LinkApplications = true
 		default:

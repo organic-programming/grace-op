@@ -857,7 +857,7 @@ func TestInstallCommand(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		code := Run([]string{"install", dir}, "0.1.0-test")
+		code := Run([]string{"install", "--build", dir}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("install returned %d, want 0", code)
 		}
@@ -910,7 +910,7 @@ func TestInstallCommandRebuildsExistingArtifact(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		code := Run([]string{"install", dir}, "0.1.0-test")
+		code := Run([]string{"install", "--build", dir}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("install returned %d, want 0", code)
 		}
@@ -954,7 +954,7 @@ func TestInstallCommandJSONFormat(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		code := Run([]string{"--format", "json", "install", dir}, "0.1.0-test")
+		code := Run([]string{"--format", "json", "install", "--build", dir}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("install --format json returned %d, want 0", code)
 		}
@@ -992,7 +992,7 @@ func TestInstallCommandProtoManifest(t *testing.T) {
 	writeProtoInstallFixture(t, root, "demo-proto")
 
 	output := captureStdout(t, func() {
-		code := Run([]string{"install", "demo-proto"}, "0.1.0-test")
+		code := Run([]string{"install", "--build", "demo-proto"}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("install returned %d, want 0", code)
 		}
@@ -1010,7 +1010,7 @@ func TestInstallCommandProtoManifest(t *testing.T) {
 	}
 }
 
-func TestInstallCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
+func TestInstallCommandFailsWhenArtifactMissing(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)
 	t.Setenv("OPPATH", filepath.Join(root, ".runtime"))
@@ -1028,9 +1028,9 @@ func TestInstallCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
 	}
 
 	stderr := captureStderr(t, func() {
-		code := Run([]string{"install", "--no-build", dir}, "0.1.0-test")
+		code := Run([]string{"install", dir}, "0.1.0-test")
 		if code != 1 {
-			t.Fatalf("install --no-build returned %d, want 1", code)
+			t.Fatalf("install returned %d, want 1", code)
 		}
 	})
 
@@ -1060,7 +1060,7 @@ func TestInstallCommandInstallsCompositeBundle(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		code := Run([]string{"install", "--no-build", dir}, "0.1.0-test")
+		code := Run([]string{"install", dir}, "0.1.0-test")
 		if code != 0 {
 			t.Fatalf("install composite returned %d, want 0", code)
 		}

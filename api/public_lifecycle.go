@@ -47,7 +47,7 @@ func Install(req *opv1.InstallRequest) (*opv1.InstallResponse, error) {
 	}
 
 	report, err := holons.Install(target, holons.InstallOptions{
-		NoBuild:          req != nil && req.GetNoBuild(),
+		Build:            req != nil && req.GetBuild(),
 		LinkApplications: req != nil && req.GetLinkApplications(),
 	})
 	return &opv1.InstallResponse{Report: installReportToProto(report)}, err

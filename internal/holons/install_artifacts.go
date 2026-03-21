@@ -202,9 +202,18 @@ func firstLaunchableBinaryInPackage(packageDir, preferredName string) string {
 		return ""
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			return filepath.Join(archDir, entry.Name())
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
 		}
+		path := filepath.Join(archDir, name)
+		if entry.IsDir() {
+			if isMacAppBundlePath(name) {
+				return path
+			}
+			continue
+		}
+		return path
 	}
 	return ""
 }

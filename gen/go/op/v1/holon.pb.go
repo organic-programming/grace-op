@@ -1630,7 +1630,7 @@ func (x *LifecycleResponse) GetReport() *LifecycleReport {
 type InstallRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Target           string                 `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
-	NoBuild          bool                   `protobuf:"varint,2,opt,name=no_build,json=noBuild,proto3" json:"no_build,omitempty"`
+	Build            bool                   `protobuf:"varint,2,opt,name=build,proto3" json:"build,omitempty"`
 	LinkApplications bool                   `protobuf:"varint,3,opt,name=link_applications,json=linkApplications,proto3" json:"link_applications,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -1673,9 +1673,9 @@ func (x *InstallRequest) GetTarget() string {
 	return ""
 }
 
-func (x *InstallRequest) GetNoBuild() bool {
+func (x *InstallRequest) GetBuild() bool {
 	if x != nil {
-		return x.NoBuild
+		return x.Build
 	}
 	return false
 }

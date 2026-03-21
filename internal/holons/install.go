@@ -14,7 +14,7 @@ import (
 )
 
 type InstallOptions struct {
-	NoBuild          bool
+	Build            bool
 	LinkApplications bool
 	Progress         progress.Reporter
 }
@@ -78,11 +78,7 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 		artifactExisted = false
 	}
 
-	if opts.NoBuild {
-		if !artifactExisted {
-			return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
-		}
-	} else {
+	if opts.Build {
 		if artifactExisted {
 			if err := os.RemoveAll(artifactPath); err != nil {
 				return report, fmt.Errorf("remove stale artifact %s: %w", report.Artifact, err)
@@ -102,6 +98,8 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 
 		artifactPath = target.Manifest.ArtifactPath(ctx)
 		report.Artifact = workspaceRelativePath(artifactPath)
+	} else if !artifactExisted {
+		return report, fmt.Errorf("artifact not found at %s; run op build first", report.Artifact)
 	}
 
 	if _, err := os.Stat(artifactPath); err != nil {

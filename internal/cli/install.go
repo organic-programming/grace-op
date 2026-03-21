@@ -23,8 +23,8 @@ func cmdInstall(format Format, globalQuiet bool, args []string) int {
 
 	for _, arg := range args {
 		switch arg {
-		case "--no-build":
-			opts.NoBuild = true
+		case "--build":
+			opts.Build = true
 		case "--link-applications":
 			opts.LinkApplications = true
 		default:
