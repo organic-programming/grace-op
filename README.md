@@ -86,12 +86,40 @@ op inspect my-service
 v0.5 — proto-first manifest, embedded canonical protos, proto stage
 pipeline, generated REFERENCE.md, full lifecycle.
 
+## Release
+
+Pushing a `v*` tag triggers the release pipeline (any branch):
+
+```bash
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+The pipeline (`go run ./scripts/releaser.go`) cross-compiles `op` for
+5 targets, then GitHub Actions publishes everything:
+
+| Target | Archive |
+|--------|---------|
+| darwin/amd64 | `.tar.gz` |
+| darwin/arm64 | `.tar.gz` |
+| linux/amd64 | `.tar.gz` |
+| linux/arm64 | `.tar.gz` |
+| windows/amd64 | `.zip` |
+
+Outputs:
+- **GitHub Release** — binaries, archives, SHA256 checksums
+- **Homebrew tap** — auto-updated formula in `organic-programming/homebrew-tap`
+- **npm** — platform-specific `@organic-programming/op-*` packages
+- **WinGet** — manifests for `OrganicProgramming.Op`
+- **`release.json`** — machine-readable manifest with all checksums
+
 ## Documentation
 
-- [OP.md](OP.md) — full specification (manifest, discovery, lifecycle, transport)
-- [HOLON_BUILD.md](../../HOLON_BUILD.md) — `op build` specification
-- [HOLON_PROTO.md](HOLON_PROTO.md) — proto manifest authoring guide
-- [HOLON_PACKAGE.md](HOLON_PACKAGE.md) — `.holon` package format
+- [OP.md](OP.md) — full documentation (manifest, discovery, lifecycle, transport)
+- [HOLON_DISCOVERY.md](./HOLON_DISCOVERY) 
+- [HOLON_BUILD.md](./HOLON_BUILD.md) — `op build` specification
+- [HOLON_PROTO.md](./HOLON_PROTO.md) — proto manifest authoring guide
+- [HOLON_PACKAGE.md](./HOLON_PACKAGE.md) — `.holon` package format
 
 ## Organic Programming
 
