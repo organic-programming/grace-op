@@ -95,66 +95,8 @@ composer (B. ALTER).
 
 ## 1. Installation
 
-### Via Go (recommended)
-
-> **Note:** `go install ...@latest` requires at least one published
-> Git tag (e.g. `v0.1.0`) on the `grace-op` repository. Until then,
-> use the "From source" method below.
-
-```bash
-export OPPATH="${OPPATH:-$HOME/.op}"
-export OPBIN="${OPBIN:-$OPPATH/bin}"
-mkdir -p "$OPBIN"
-GOBIN="$OPBIN" go install github.com/organic-programming/grace-op/cmd/op@latest
-export PATH="$OPBIN:$PATH"
-```
-
-### From source
-
-```bash
-cd ./holons/grace-op && go run ./cmd/op install .
-```
-
-### Bootstrap from zero
-
-```bash
-go install github.com/organic-programming/grace-op/cmd/op@latest
-op env --init
-eval "$(op env --shell)"
-```
-
-After bootstrap, `op` is in `~/.op/bin/` and all OP commands are
-available.
-
-### Shell completion
-
-`op` supports tab-completion for zsh and bash. Completions use the
-existing discovery mechanism: identity-derived slugs, OPBIN entries,
-and PATH binaries are all suggested.
-
-**zsh** (add to `~/.zshrc`):
-
-```bash
-eval "$(op completion zsh)"
-```
-
-**bash** (add to `~/.bashrc`):
-
-```bash
-eval "$(op completion bash)"
-```
-
-After sourcing, tab-completion works for all holon-accepting commands:
-
-```
-op run gudule-<TAB>       →  gudule-greeting-godart, gudule-greeting-goswift, ...
-op build grace<TAB>       →  grace-op
-op install rob<TAB>       →  rob-go
-op uninstall <TAB>        →  only lists installed holons from $OPBIN
-```
-
-Subcommands (`build`, `run`, `install`, `check`, `test`, `clean`,
-`inspect`, `show`, `uninstall`) are also completed at the verb level.
+See [INSTALL.md](INSTALL.md) for all installation methods, environment
+setup, shell completion, and uninstall instructions.
 
 ---
 

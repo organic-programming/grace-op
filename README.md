@@ -1,196 +1,99 @@
 # OP — The Organic Programming CLI
 
-
-<!-- Would prefer "Calculemus!" -->
-
 > *"One command, every holon."*
 
-OP is the unified entry point to the Organic Programming ecosystem.
-It discovers holons — locally or over the network — and dispatches
-commands to them through a single interface.
+OP discovers holons, builds them, manages their identities, and
+dispatches commands — all from a single binary.
 
 ## Install
-
-
-<!--todo 
-
-INSTALLATION MUST BE VERY EASY AND SETUP ANYTHING REQUIRED. 
-OPPATH OPBIN 
-my  install path is  ~/.op/bin/grace-op.holon/bin/darwin_arm64 where the arch may change 
-and with a symlink to  ~/.op/bin/grace-op.holon/bin/op
-
-
-So something like
-
-= from source 
-git clone 
-go build op  
-
-Then we should use  op 
-1. to set up the env 
-2. 
-
-a one line script should be proposed. 
-
--->
-
-```bash
-GOBIN="$OPBIN/grac" go install github.com/organic-programming/grace-op/cmd/op@latest
-```
-
-The binary is installed as `op` (not `grace-op`) because the Go module
-entry point is `cmd/op`.
-
-Package-manager install paths and uninstall commands live in
-[INSTALL.md](INSTALL.md).
-
-### From Source
-
-```bash
-git clone https://github.com/organic-programming/grace-op.git
-cd grace-op
-go build -o op ./cmd/op && mv op "$OPBIN/"
-```
-
-## Environment Setup
-
-OP stores its runtime data under `$OPPATH` (defaults to `~/.op`) and
-installs binaries into `$OPBIN` (defaults to `$OPPATH/bin`).
 
 ### macOS / Linux
 
 ```bash
-# Create the directories
-op env --init
-
-# Append the shell snippet to your profile
-op env --shell >> ~/.zshrc   # or ~/.bashrc
-source ~/.zshrc
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/organic-programming/grace-op/dev/scripts/install.sh)"
 ```
 
-`op env --shell` outputs:
+Or via Homebrew:
 
 ```bash
-export OPPATH="${OPPATH:-$HOME/.op}"
-export OPBIN="${OPBIN:-$OPPATH/bin}"
-mkdir -p "$OPBIN"
-export PATH="$OPBIN:$PATH"
+brew tap organic-programming/tap && brew install op
 ```
 
 ### Windows
 
 ```powershell
-# Create the directories
-op env --init
-
-# Set environment variables (persistent, user-level)
-[System.Environment]::SetEnvironmentVariable("OPPATH", "$env:USERPROFILE\.op", "User")
-[System.Environment]::SetEnvironmentVariable("OPBIN", "$env:USERPROFILE\.op\bin", "User")
-
-# Add OPBIN to PATH
-$path = [System.Environment]::GetEnvironmentVariable("PATH", "User")
-[System.Environment]::SetEnvironmentVariable("PATH", "$env:USERPROFILE\.op\bin;$path", "User")
+irm https://raw.githubusercontent.com/organic-programming/grace-op/dev/scripts/install.ps1 | iex
 ```
 
-Restart your terminal after running these commands.
+Or via Chocolatey:
+
+```powershell
+choco install op
+```
+
+### Go (any platform)
+
+```bash
+go install github.com/organic-programming/grace-op/cmd/op@latest
+op env --init
+op install .
+```
+
+Then activate (or restart your terminal):
+
+```bash
+eval "$(op env --shell)"                                    # macOS / Linux
+```
+```powershell
+op env --init   # Windows (OPBIN is added to PATH by op install)
+```
+
+### From source
+
+```bash
+git clone https://github.com/organic-programming/grace-op.git
+cd grace-op
+go run ./cmd/op env --init
+go run ./cmd/op install .
+```
+
+Then activate as above, or restart your terminal.
 
 ## Usage
 
-```
-# Identity commands
-op new                               → create a new holon identity
-op new --list                        → list shipped templates
-op new --template go-daemon my-app   → generate a scaffold
-op list                              → list all known holons
-op show <uuid>                       → display a holon's identity
-
-# Full namespace (dispatch to any holon binary)
-op rob-go build                      → direct holon dispatch
-op translate file.md --to fr         → abel-fishel-translator
-
-# OP's own commands
-op discover                          → list all available holons
-op install my-app                    → build and install into ~/.op/bin
-op install my-app --no-build         → install an existing artifact
-op install my-ui --link-applications → install a .app and link it on macOS
-op mod pull                          → fetch dependencies into $OPPATH/cache
-op env --shell                       → print shell setup
-op version                           → show op version
-```
-
-## Templates
-
-`op new --template` ships scaffold templates for daemon, wrapper,
-toolchain, composition, host UI, and composite holons. Use
-`op new --list` to inspect the catalog, then generate into the current
-workspace:
-
 ```bash
-op new --template go-daemon gabriel-greeting-go
-op new --template composite-go-swiftui studio-console
-```
+# Create a holon
+op new --template go-daemon my-service
 
-## Grace OP list over every transport
+# Build, test, install
+op build my-service
+op test my-service
+op install my-service
 
-Use `ListIdentities` (the gRPC equivalent of `op list`) through each
-transport supported by Grace OP:
+# Dispatch commands
+op my-service SayHello '{"name":"Alice"}'
 
-```bash
-# 1) CLI facet (delegated command)
-op list .
+# Direct transport
+op grpc+stdio://my-service SayHello '{"name":"Alice"}'
 
-# 2) Promoted verb (same provider behavior as `op list`)
-op list .
-
-# 3) gRPC over TCP (persistent server)
-op run grace-op:9090
-op grpc://localhost:9090 ListIdentities '{}'
-# stop with: kill <pid printed by op run>
-
-# 4) gRPC over Unix socket (persistent server)
-op run grace-op --listen unix:///tmp/op.sock
-op grpc+unix:///tmp/op.sock ListIdentities '{}'
-# stop with: kill <pid printed by op run>
-
-# 5) gRPC over stdio (ephemeral, no `op run`)
-op grpc+stdio://grace-op ListIdentities '{}'
-```
-
-## Shell Completion
-
-`op` supports tab-completion for **zsh** and **bash**.
-
-```bash
-# zsh — add to ~/.zshrc
-eval "$(op completion zsh)"
-
-# bash — add to ~/.bashrc
-eval "$(op completion bash)"
-```
-
-Then restart your shell. Completions use the existing discovery
-mechanism — identity-derived slugs, OPBIN entries, and PATH binaries
-are all suggested:
-
-```
-op run gabriel-<TAB>      →  gabriel-greeting-app-swiftui, gabriel-greeting-go, ...
-op build op<TAB>          →  grace-op (has an alias)
-op uninstall <TAB>        →  only installed holons from $OPBIN
+# Discover and inspect
+op list
+op inspect my-service
 ```
 
 ## Status
 
-v0.5.0 — proto-first manifest, public `api/` CLI and code facets, thin gRPC server delegation, and Gabriel-style facet boundaries.
+v0.5 — proto-first manifest, embedded canonical protos, proto stage
+pipeline, generated REFERENCE.md, full lifecycle.
 
-## Design
+## Documentation
 
-- [HOLON_BUILD.md](../../HOLON_BUILD.md) — proposed contract for
-  manifest-driven `op build`, including composite holons and `recipe`
-  orchestration.
+- [OP.md](OP.md) — full specification (manifest, discovery, lifecycle, transport)
+- [HOLON_BUILD.md](../../HOLON_BUILD.md) — `op build` specification
+- [HOLON_PROTO.md](HOLON_PROTO.md) — proto manifest authoring guide
+- [HOLON_PACKAGE.md](HOLON_PACKAGE.md) — `.holon` package format
 
 ## Organic Programming
 
-This holon is part of the [Organic Programming](https://github.com/organic-programming/seed)
-ecosystem. For context, see:
-
-- [Constitution](https://github.com/organic-programming/seed/blob/master/AGENT.md) — what a holon is
+Part of the [Organic Programming](https://github.com/organic-programming/seed)
+ecosystem. See the [Constitution](https://github.com/organic-programming/seed/blob/master/AGENT.md).
