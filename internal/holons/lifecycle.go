@@ -125,6 +125,13 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		report.Notes = append(report.Notes, "manifest and prerequisites validated")
 		return report, nil
 	case OperationBuild:
+		// Proto stage: stage, parse, and compile descriptors.
+		if !ctx.DryRun {
+			if err := protoStage(target.Manifest, reporter); err != nil {
+				return report, err
+			}
+		}
+
 		// Auto-increment patch version in the proto before build.
 		// On failure the original version is restored; on success it sticks.
 		if !ctx.DryRun {
