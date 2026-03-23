@@ -225,6 +225,11 @@ func describeTemplateFuncs(ext string) template.FuncMap {
 			return goDescribeResponseLiteral(response)
 		}
 	}
+	if ext == "rs" {
+		funcs["rustDescribeResponse"] = func(response *holonsv1.DescribeResponse) string {
+			return rustDescribeResponseLiteral(response)
+		}
+	}
 	if ext == "c" {
 		funcs["cDescribeSource"] = func(response *holonsv1.DescribeResponse) string {
 			return cDescribeSource(response)
@@ -616,6 +621,293 @@ func goIndent(indent int) string {
 		return ""
 	}
 	return strings.Repeat("\t", indent)
+}
+
+func rustDescribeResponseLiteral(response *holonsv1.DescribeResponse) string {
+	if response == nil {
+		return "DescribeResponse {\n    manifest: None,\n    services: vec![],\n}"
+	}
+	return rustLiteralValue(0, func(buf *strings.Builder, indent int) {
+		writeRustDescribeResponseLiteral(buf, response, indent)
+	})
+}
+
+func writeRustDescribeResponseLiteral(buf *strings.Builder, response *holonsv1.DescribeResponse, indent int) {
+	writeRustLine(buf, indent, "DescribeResponse {")
+	if response.GetManifest() != nil {
+		writeRustOptionField(buf, indent+1, "manifest", func(buf *strings.Builder, indent int) {
+			writeRustHolonManifestLiteral(buf, response.GetManifest(), indent)
+		})
+	} else {
+		writeRustLine(buf, indent+1, "manifest: None,")
+	}
+	writeRustRepeatedField(buf, indent+1, "services", len(response.GetServices()), func(index int, buf *strings.Builder, indent int) {
+		writeRustServiceDocLiteral(buf, response.GetServices()[index], indent)
+	})
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustHolonManifestLiteral(buf *strings.Builder, manifest *holonsv1.HolonManifest, indent int) {
+	if manifest == nil {
+		buf.WriteString("None")
+		return
+	}
+
+	writeRustLine(buf, indent, "HolonManifest {")
+	if manifest.GetIdentity() != nil {
+		writeRustOptionField(buf, indent+1, "identity", func(buf *strings.Builder, indent int) {
+			writeRustIdentityLiteral(buf, manifest.GetIdentity(), indent)
+		})
+	} else {
+		writeRustLine(buf, indent+1, "identity: None,")
+	}
+	writeRustStringField(buf, indent+1, "description", manifest.GetDescription())
+	writeRustStringField(buf, indent+1, "lang", manifest.GetLang())
+	writeRustRepeatedField(buf, indent+1, "skills", len(manifest.GetSkills()), func(index int, buf *strings.Builder, indent int) {
+		writeRustSkillLiteral(buf, manifest.GetSkills()[index], indent)
+	})
+	writeRustLine(buf, indent+1, "contract: None,")
+	writeRustStringField(buf, indent+1, "kind", manifest.GetKind())
+	writeRustStringVecField(buf, indent+1, "platforms", manifest.GetPlatforms())
+	writeRustStringField(buf, indent+1, "transport", manifest.GetTransport())
+	if manifest.GetBuild() != nil {
+		writeRustOptionField(buf, indent+1, "build", func(buf *strings.Builder, indent int) {
+			writeRustBuildLiteral(buf, manifest.GetBuild(), indent)
+		})
+	} else {
+		writeRustLine(buf, indent+1, "build: None,")
+	}
+	if manifest.GetRequires() != nil {
+		writeRustOptionField(buf, indent+1, "requires", func(buf *strings.Builder, indent int) {
+			writeRustRequiresLiteral(buf, manifest.GetRequires(), indent)
+		})
+	} else {
+		writeRustLine(buf, indent+1, "requires: None,")
+	}
+	if manifest.GetArtifacts() != nil {
+		writeRustOptionField(buf, indent+1, "artifacts", func(buf *strings.Builder, indent int) {
+			writeRustArtifactsLiteral(buf, manifest.GetArtifacts(), indent)
+		})
+	} else {
+		writeRustLine(buf, indent+1, "artifacts: None,")
+	}
+	writeRustRepeatedField(buf, indent+1, "sequences", len(manifest.GetSequences()), func(index int, buf *strings.Builder, indent int) {
+		writeRustSequenceLiteral(buf, manifest.GetSequences()[index], indent)
+	})
+	writeRustStringField(buf, indent+1, "guide", manifest.GetGuide())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustIdentityLiteral(buf *strings.Builder, identity *holonsv1.HolonManifest_Identity, indent int) {
+	writeRustLine(buf, indent, "Identity {")
+	writeRustStringField(buf, indent+1, "schema", identity.GetSchema())
+	writeRustStringField(buf, indent+1, "uuid", identity.GetUuid())
+	writeRustStringField(buf, indent+1, "given_name", identity.GetGivenName())
+	writeRustStringField(buf, indent+1, "family_name", identity.GetFamilyName())
+	writeRustStringField(buf, indent+1, "motto", identity.GetMotto())
+	writeRustStringField(buf, indent+1, "composer", identity.GetComposer())
+	writeRustStringField(buf, indent+1, "status", identity.GetStatus())
+	writeRustStringField(buf, indent+1, "born", identity.GetBorn())
+	writeRustStringField(buf, indent+1, "version", identity.GetVersion())
+	writeRustStringVecField(buf, indent+1, "aliases", identity.GetAliases())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustSkillLiteral(buf *strings.Builder, skill *holonsv1.HolonManifest_Skill, indent int) {
+	writeRustLine(buf, indent, "Skill {")
+	writeRustStringField(buf, indent+1, "name", skill.GetName())
+	writeRustStringField(buf, indent+1, "description", skill.GetDescription())
+	writeRustStringField(buf, indent+1, "when", skill.GetWhen())
+	writeRustStringVecField(buf, indent+1, "steps", skill.GetSteps())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustSequenceLiteral(buf *strings.Builder, sequence *holonsv1.HolonManifest_Sequence, indent int) {
+	writeRustLine(buf, indent, "Sequence {")
+	writeRustStringField(buf, indent+1, "name", sequence.GetName())
+	writeRustStringField(buf, indent+1, "description", sequence.GetDescription())
+	writeRustRepeatedField(buf, indent+1, "params", len(sequence.GetParams()), func(index int, buf *strings.Builder, indent int) {
+		writeRustSequenceParamLiteral(buf, sequence.GetParams()[index], indent)
+	})
+	writeRustStringVecField(buf, indent+1, "steps", sequence.GetSteps())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustSequenceParamLiteral(buf *strings.Builder, param *holonsv1.HolonManifest_Sequence_Param, indent int) {
+	writeRustLine(buf, indent, "Param {")
+	writeRustStringField(buf, indent+1, "name", param.GetName())
+	writeRustStringField(buf, indent+1, "description", param.GetDescription())
+	writeRustBoolField(buf, indent+1, "required", param.GetRequired())
+	writeRustStringField(buf, indent+1, "default", param.GetDefault())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustBuildLiteral(buf *strings.Builder, build *holonsv1.HolonManifest_Build, indent int) {
+	writeRustLine(buf, indent, "Build {")
+	writeRustStringField(buf, indent+1, "runner", build.GetRunner())
+	writeRustStringField(buf, indent+1, "main", build.GetMain())
+	writeRustLine(buf, indent+1, "defaults: None,")
+	writeRustRepeatedField(buf, indent+1, "members", 0, func(_ int, _ *strings.Builder, _ int) {})
+	writeRustLine(buf, indent+1, "targets: ::std::collections::HashMap::new(),")
+	writeRustStringVecField(buf, indent+1, "templates", build.GetTemplates())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustRequiresLiteral(buf *strings.Builder, requires *holonsv1.HolonManifest_Requires, indent int) {
+	writeRustLine(buf, indent, "Requires {")
+	writeRustStringVecField(buf, indent+1, "commands", requires.GetCommands())
+	writeRustStringVecField(buf, indent+1, "files", requires.GetFiles())
+	writeRustStringVecField(buf, indent+1, "platforms", requires.GetPlatforms())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustArtifactsLiteral(buf *strings.Builder, artifacts *holonsv1.HolonManifest_Artifacts, indent int) {
+	writeRustLine(buf, indent, "Artifacts {")
+	writeRustStringField(buf, indent+1, "binary", artifacts.GetBinary())
+	writeRustStringField(buf, indent+1, "primary", artifacts.GetPrimary())
+	writeRustLine(buf, indent+1, "by_target: ::std::collections::HashMap::new(),")
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustServiceDocLiteral(buf *strings.Builder, service *holonsv1.ServiceDoc, indent int) {
+	writeRustLine(buf, indent, "ServiceDoc {")
+	writeRustStringField(buf, indent+1, "name", service.GetName())
+	writeRustStringField(buf, indent+1, "description", service.GetDescription())
+	writeRustRepeatedField(buf, indent+1, "methods", len(service.GetMethods()), func(index int, buf *strings.Builder, indent int) {
+		writeRustMethodDocLiteral(buf, service.GetMethods()[index], indent)
+	})
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustMethodDocLiteral(buf *strings.Builder, method *holonsv1.MethodDoc, indent int) {
+	writeRustLine(buf, indent, "MethodDoc {")
+	writeRustStringField(buf, indent+1, "name", method.GetName())
+	writeRustStringField(buf, indent+1, "description", method.GetDescription())
+	writeRustStringField(buf, indent+1, "input_type", method.GetInputType())
+	writeRustStringField(buf, indent+1, "output_type", method.GetOutputType())
+	writeRustRepeatedField(buf, indent+1, "input_fields", len(method.GetInputFields()), func(index int, buf *strings.Builder, indent int) {
+		writeRustFieldDocLiteral(buf, method.GetInputFields()[index], indent)
+	})
+	writeRustRepeatedField(buf, indent+1, "output_fields", len(method.GetOutputFields()), func(index int, buf *strings.Builder, indent int) {
+		writeRustFieldDocLiteral(buf, method.GetOutputFields()[index], indent)
+	})
+	writeRustBoolField(buf, indent+1, "client_streaming", method.GetClientStreaming())
+	writeRustBoolField(buf, indent+1, "server_streaming", method.GetServerStreaming())
+	writeRustStringField(buf, indent+1, "example_input", method.GetExampleInput())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustFieldDocLiteral(buf *strings.Builder, field *holonsv1.FieldDoc, indent int) {
+	writeRustLine(buf, indent, "FieldDoc {")
+	writeRustStringField(buf, indent+1, "name", field.GetName())
+	writeRustStringField(buf, indent+1, "r#type", field.GetType())
+	writeRustInt32Field(buf, indent+1, "number", field.GetNumber())
+	writeRustStringField(buf, indent+1, "description", field.GetDescription())
+	writeRustLine(buf, indent+1, fmt.Sprintf("label: %s as i32,", rustFieldLabelLiteral(field.GetLabel())))
+	writeRustStringField(buf, indent+1, "map_key_type", field.GetMapKeyType())
+	writeRustStringField(buf, indent+1, "map_value_type", field.GetMapValueType())
+	writeRustRepeatedField(buf, indent+1, "nested_fields", len(field.GetNestedFields()), func(index int, buf *strings.Builder, indent int) {
+		writeRustFieldDocLiteral(buf, field.GetNestedFields()[index], indent)
+	})
+	writeRustRepeatedField(buf, indent+1, "enum_values", len(field.GetEnumValues()), func(index int, buf *strings.Builder, indent int) {
+		writeRustEnumValueDocLiteral(buf, field.GetEnumValues()[index], indent)
+	})
+	writeRustBoolField(buf, indent+1, "required", field.GetRequired())
+	writeRustStringField(buf, indent+1, "example", field.GetExample())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustEnumValueDocLiteral(buf *strings.Builder, value *holonsv1.EnumValueDoc, indent int) {
+	writeRustLine(buf, indent, "EnumValueDoc {")
+	writeRustStringField(buf, indent+1, "name", value.GetName())
+	writeRustInt32Field(buf, indent+1, "number", value.GetNumber())
+	writeRustStringField(buf, indent+1, "description", value.GetDescription())
+	writeRustLine(buf, indent, "}")
+}
+
+func writeRustOptionField(buf *strings.Builder, indent int, fieldName string, write func(*strings.Builder, int)) {
+	writeRustLine(buf, indent, fieldName+": Some(")
+	write(buf, indent+1)
+	writeRustLine(buf, indent, "),")
+}
+
+func writeRustRepeatedField(buf *strings.Builder, indent int, fieldName string, count int, write func(int, *strings.Builder, int)) {
+	if count == 0 {
+		writeRustLine(buf, indent, fieldName+": vec![],")
+		return
+	}
+
+	writeRustLine(buf, indent, fieldName+": vec![")
+	for index := 0; index < count; index++ {
+		write(index, buf, indent+1)
+		writeRustLine(buf, indent+1, ",")
+	}
+	writeRustLine(buf, indent, "],")
+}
+
+func writeRustStringField(buf *strings.Builder, indent int, fieldName, value string) {
+	writeRustLine(buf, indent, fmt.Sprintf("%s: %s.to_string(),", fieldName, strconv.Quote(value)))
+}
+
+func writeRustStringVecField(buf *strings.Builder, indent int, fieldName string, values []string) {
+	if len(values) == 0 {
+		writeRustLine(buf, indent, fieldName+": vec![],")
+		return
+	}
+
+	writeRustLine(buf, indent, fieldName+": vec![")
+	for _, value := range values {
+		writeRustLine(buf, indent+1, fmt.Sprintf("%s.to_string(),", strconv.Quote(value)))
+	}
+	writeRustLine(buf, indent, "],")
+}
+
+func writeRustBoolField(buf *strings.Builder, indent int, fieldName string, value bool) {
+	if value {
+		writeRustLine(buf, indent, fmt.Sprintf("%s: true,", fieldName))
+		return
+	}
+	writeRustLine(buf, indent, fmt.Sprintf("%s: false,", fieldName))
+}
+
+func writeRustInt32Field(buf *strings.Builder, indent int, fieldName string, value int32) {
+	writeRustLine(buf, indent, fmt.Sprintf("%s: %d,", fieldName, value))
+}
+
+func rustFieldLabelLiteral(value holonsv1.FieldLabel) string {
+	switch value {
+	case holonsv1.FieldLabel_FIELD_LABEL_UNSPECIFIED:
+		return "FieldLabel::Unspecified"
+	case holonsv1.FieldLabel_FIELD_LABEL_OPTIONAL:
+		return "FieldLabel::Optional"
+	case holonsv1.FieldLabel_FIELD_LABEL_REPEATED:
+		return "FieldLabel::Repeated"
+	case holonsv1.FieldLabel_FIELD_LABEL_MAP:
+		return "FieldLabel::Map"
+	case holonsv1.FieldLabel_FIELD_LABEL_REQUIRED:
+		return "FieldLabel::Required"
+	default:
+		return fmt.Sprintf("FieldLabel::from_i32(%d).unwrap_or(FieldLabel::Unspecified)", value)
+	}
+}
+
+func rustLiteralValue(indent int, write func(*strings.Builder, int)) string {
+	var buf strings.Builder
+	write(&buf, indent)
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func writeRustLine(buf *strings.Builder, indent int, line string) {
+	buf.WriteString(rustIndent(indent))
+	buf.WriteString(line)
+	buf.WriteString("\n")
+}
+
+func rustIndent(indent int) string {
+	if indent <= 0 {
+		return ""
+	}
+	return strings.Repeat("    ", indent)
 }
 
 type cDescribeEmitter struct {
