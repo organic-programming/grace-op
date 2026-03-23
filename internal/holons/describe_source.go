@@ -225,6 +225,16 @@ func describeTemplateFuncs(ext string) template.FuncMap {
 			return goDescribeResponseLiteral(response)
 		}
 	}
+	if ext == "c" {
+		funcs["cDescribeSource"] = func(response *holonsv1.DescribeResponse) string {
+			return cDescribeSource(response)
+		}
+	}
+	if ext == "h" || ext == "hh" || ext == "hpp" || ext == "cc" || ext == "cpp" || ext == "cxx" {
+		funcs["cppDescribeResponse"] = func(response *holonsv1.DescribeResponse) string {
+			return cppDescribeResponse(response)
+		}
+	}
 	return funcs
 }
 
@@ -606,4 +616,455 @@ func goIndent(indent int) string {
 		return ""
 	}
 	return strings.Repeat("\t", indent)
+}
+
+type cDescribeEmitter struct {
+	counter     int
+	definitions []string
+}
+
+func cDescribeSource(response *holonsv1.DescribeResponse) string {
+	emitter := &cDescribeEmitter{}
+	servicesName, serviceCount := emitter.writeServiceArray(response.GetServices())
+
+	var buf strings.Builder
+	for _, definition := range emitter.definitions {
+		buf.WriteString(definition)
+		buf.WriteString("\n\n")
+	}
+
+	writeCLine(&buf, 0, "static holons_describe_response_t holons_generated_describe_response_value = {")
+	buf.WriteString(cManifestInitializer(response.GetManifest(), 1))
+	writeCLine(&buf, 1, fmt.Sprintf(".services = %s,", cArrayPointer(servicesName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".service_count = %d,", serviceCount))
+	writeCLine(&buf, 0, "};")
+	buf.WriteString("\n")
+	writeCLine(&buf, 0, "const holons_describe_response_t *holons_generated_describe_response(void) {")
+	writeCLine(&buf, 1, "return &holons_generated_describe_response_value;")
+	writeCLine(&buf, 0, "}")
+
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func (e *cDescribeEmitter) nextName(prefix string) string {
+	e.counter++
+	return fmt.Sprintf("holons_generated_%s_%d", prefix, e.counter)
+}
+
+func (e *cDescribeEmitter) writeServiceArray(services []*holonsv1.ServiceDoc) (string, int) {
+	if len(services) == 0 {
+		return "", 0
+	}
+
+	name := e.nextName("services")
+	items := make([]string, 0, len(services))
+	for _, service := range services {
+		methodsName, methodCount := e.writeMethodArray(service.GetMethods())
+		items = append(items, cServiceInitializer(service, methodsName, methodCount))
+	}
+	e.writeDefinition("holons_service_doc_t", name, items)
+	return name, len(services)
+}
+
+func (e *cDescribeEmitter) writeMethodArray(methods []*holonsv1.MethodDoc) (string, int) {
+	if len(methods) == 0 {
+		return "", 0
+	}
+
+	name := e.nextName("methods")
+	items := make([]string, 0, len(methods))
+	for _, method := range methods {
+		inputFieldsName, inputFieldCount := e.writeFieldArray(method.GetInputFields())
+		outputFieldsName, outputFieldCount := e.writeFieldArray(method.GetOutputFields())
+		items = append(items, cMethodInitializer(method, inputFieldsName, inputFieldCount, outputFieldsName, outputFieldCount))
+	}
+	e.writeDefinition("holons_method_doc_t", name, items)
+	return name, len(methods)
+}
+
+func (e *cDescribeEmitter) writeFieldArray(fields []*holonsv1.FieldDoc) (string, int) {
+	if len(fields) == 0 {
+		return "", 0
+	}
+
+	name := e.nextName("fields")
+	items := make([]string, 0, len(fields))
+	for _, field := range fields {
+		nestedFieldsName, nestedFieldCount := e.writeFieldArray(field.GetNestedFields())
+		enumValuesName, enumValueCount := e.writeEnumValueArray(field.GetEnumValues())
+		items = append(items, cFieldInitializer(field, nestedFieldsName, nestedFieldCount, enumValuesName, enumValueCount))
+	}
+	e.writeDefinition("holons_field_doc_t", name, items)
+	return name, len(fields)
+}
+
+func (e *cDescribeEmitter) writeEnumValueArray(values []*holonsv1.EnumValueDoc) (string, int) {
+	if len(values) == 0 {
+		return "", 0
+	}
+
+	name := e.nextName("enum_values")
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		items = append(items, cEnumValueInitializer(value))
+	}
+	e.writeDefinition("holons_enum_value_doc_t", name, items)
+	return name, len(values)
+}
+
+func (e *cDescribeEmitter) writeDefinition(typeName, name string, items []string) {
+	var buf strings.Builder
+	writeCLine(&buf, 0, fmt.Sprintf("static %s %s[] = {", typeName, name))
+	for i, item := range items {
+		buf.WriteString(indentCLiteral(item, 1))
+		if i < len(items)-1 {
+			buf.WriteString(",")
+		}
+		buf.WriteString("\n")
+	}
+	writeCLine(&buf, 0, "};")
+	e.definitions = append(e.definitions, strings.TrimSuffix(buf.String(), "\n"))
+}
+
+func cManifestInitializer(manifest *holonsv1.HolonManifest, indent int) string {
+	var buf strings.Builder
+	writeCLine(&buf, indent, ".manifest = {")
+	if manifest != nil {
+		writeCLine(&buf, indent+1, ".identity = {")
+		if identity := manifest.GetIdentity(); identity != nil {
+			writeCStringField(&buf, indent+2, ".uuid", identity.GetUuid())
+			writeCStringField(&buf, indent+2, ".given_name", identity.GetGivenName())
+			writeCStringField(&buf, indent+2, ".family_name", identity.GetFamilyName())
+			writeCStringField(&buf, indent+2, ".motto", identity.GetMotto())
+			writeCStringField(&buf, indent+2, ".composer", identity.GetComposer())
+			writeCStringField(&buf, indent+2, ".status", identity.GetStatus())
+			writeCStringField(&buf, indent+2, ".born", identity.GetBorn())
+		}
+		writeCLine(&buf, indent+1, "},")
+		writeCStringField(&buf, indent+1, ".lang", manifest.GetLang())
+		writeCStringField(&buf, indent+1, ".kind", manifest.GetKind())
+		if build := manifest.GetBuild(); build != nil {
+			writeCLine(&buf, indent+1, ".build = {")
+			writeCStringField(&buf, indent+2, ".runner", build.GetRunner())
+			writeCStringField(&buf, indent+2, ".main", build.GetMain())
+			writeCLine(&buf, indent+1, "},")
+		}
+		if artifacts := manifest.GetArtifacts(); artifacts != nil {
+			writeCLine(&buf, indent+1, ".artifacts = {")
+			writeCStringField(&buf, indent+2, ".binary", artifacts.GetBinary())
+			writeCStringField(&buf, indent+2, ".primary", artifacts.GetPrimary())
+			writeCLine(&buf, indent+1, "},")
+		}
+	}
+	writeCLine(&buf, indent, "},")
+	return buf.String()
+}
+
+func cServiceInitializer(service *holonsv1.ServiceDoc, methodsName string, methodCount int) string {
+	var buf strings.Builder
+	writeCLine(&buf, 0, "{")
+	writeCStringField(&buf, 1, ".name", service.GetName())
+	writeCStringField(&buf, 1, ".description", service.GetDescription())
+	writeCLine(&buf, 1, fmt.Sprintf(".methods = %s,", cArrayPointer(methodsName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".method_count = %d,", methodCount))
+	writeCLine(&buf, 0, "}")
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func cMethodInitializer(method *holonsv1.MethodDoc, inputFieldsName string, inputFieldCount int, outputFieldsName string, outputFieldCount int) string {
+	var buf strings.Builder
+	writeCLine(&buf, 0, "{")
+	writeCStringField(&buf, 1, ".name", method.GetName())
+	writeCStringField(&buf, 1, ".description", method.GetDescription())
+	writeCStringField(&buf, 1, ".input_type", method.GetInputType())
+	writeCStringField(&buf, 1, ".output_type", method.GetOutputType())
+	writeCLine(&buf, 1, fmt.Sprintf(".input_fields = %s,", cArrayPointer(inputFieldsName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".input_field_count = %d,", inputFieldCount))
+	writeCLine(&buf, 1, fmt.Sprintf(".output_fields = %s,", cArrayPointer(outputFieldsName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".output_field_count = %d,", outputFieldCount))
+	writeCLine(&buf, 1, fmt.Sprintf(".client_streaming = %d,", cBool(method.GetClientStreaming())))
+	writeCLine(&buf, 1, fmt.Sprintf(".server_streaming = %d,", cBool(method.GetServerStreaming())))
+	writeCStringField(&buf, 1, ".example_input", method.GetExampleInput())
+	writeCLine(&buf, 0, "}")
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func cFieldInitializer(field *holonsv1.FieldDoc, nestedFieldsName string, nestedFieldCount int, enumValuesName string, enumValueCount int) string {
+	var buf strings.Builder
+	writeCLine(&buf, 0, "{")
+	writeCStringField(&buf, 1, ".name", field.GetName())
+	writeCStringField(&buf, 1, ".type", field.GetType())
+	writeCLine(&buf, 1, fmt.Sprintf(".number = %d,", field.GetNumber()))
+	writeCStringField(&buf, 1, ".description", field.GetDescription())
+	writeCLine(&buf, 1, fmt.Sprintf(".label = %s,", cFieldLabelLiteral(field.GetLabel())))
+	writeCStringField(&buf, 1, ".map_key_type", field.GetMapKeyType())
+	writeCStringField(&buf, 1, ".map_value_type", field.GetMapValueType())
+	writeCLine(&buf, 1, fmt.Sprintf(".nested_fields = %s,", cArrayPointer(nestedFieldsName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".nested_field_count = %d,", nestedFieldCount))
+	writeCLine(&buf, 1, fmt.Sprintf(".enum_values = %s,", cArrayPointer(enumValuesName)))
+	writeCLine(&buf, 1, fmt.Sprintf(".enum_value_count = %d,", enumValueCount))
+	writeCLine(&buf, 1, fmt.Sprintf(".required = %d,", cBool(field.GetRequired())))
+	writeCStringField(&buf, 1, ".example", field.GetExample())
+	writeCLine(&buf, 0, "}")
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func cEnumValueInitializer(value *holonsv1.EnumValueDoc) string {
+	var buf strings.Builder
+	writeCLine(&buf, 0, "{")
+	writeCStringField(&buf, 1, ".name", value.GetName())
+	writeCLine(&buf, 1, fmt.Sprintf(".number = %d,", value.GetNumber()))
+	writeCStringField(&buf, 1, ".description", value.GetDescription())
+	writeCLine(&buf, 0, "}")
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func cFieldLabelLiteral(value holonsv1.FieldLabel) string {
+	switch value {
+	case holonsv1.FieldLabel_FIELD_LABEL_OPTIONAL:
+		return "HOLONS_FIELD_LABEL_OPTIONAL"
+	case holonsv1.FieldLabel_FIELD_LABEL_REPEATED:
+		return "HOLONS_FIELD_LABEL_REPEATED"
+	case holonsv1.FieldLabel_FIELD_LABEL_MAP:
+		return "HOLONS_FIELD_LABEL_MAP"
+	case holonsv1.FieldLabel_FIELD_LABEL_REQUIRED:
+		return "HOLONS_FIELD_LABEL_REQUIRED"
+	default:
+		return "HOLONS_FIELD_LABEL_UNSPECIFIED"
+	}
+}
+
+func cArrayPointer(name string) string {
+	if name == "" {
+		return "NULL"
+	}
+	return name
+}
+
+func cBool(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func writeCStringField(buf *strings.Builder, indent int, fieldName, value string) {
+	if value == "" {
+		return
+	}
+	writeCLine(buf, indent, fmt.Sprintf("%s = %s,", fieldName, strconv.Quote(value)))
+}
+
+func writeCLine(buf *strings.Builder, indent int, line string) {
+	buf.WriteString(cIndent(indent))
+	buf.WriteString(line)
+	buf.WriteString("\n")
+}
+
+func cIndent(indent int) string {
+	if indent <= 0 {
+		return ""
+	}
+	return strings.Repeat("  ", indent)
+}
+
+func indentCLiteral(literal string, indent int) string {
+	lines := strings.Split(literal, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = cIndent(indent) + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func cppDescribeResponse(response *holonsv1.DescribeResponse) string {
+	var buf strings.Builder
+	writeCLine(&buf, 0, "[] {")
+	writeCLine(&buf, 1, "holons::v1::DescribeResponse response;")
+	if response != nil {
+		if response.GetManifest() != nil {
+			writeCPPHolonManifest(&buf, response.GetManifest())
+		}
+		for _, service := range response.GetServices() {
+			writeCPPServiceDoc(&buf, service)
+		}
+	}
+	writeCLine(&buf, 1, "return response;")
+	writeCLine(&buf, 0, "}()")
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+func writeCPPHolonManifest(buf *strings.Builder, manifest *holonsv1.HolonManifest) {
+	if manifest == nil {
+		return
+	}
+
+	writeCLine(buf, 1, "{")
+	writeCLine(buf, 2, "auto *manifest = response.mutable_manifest();")
+	if identity := manifest.GetIdentity(); identity != nil {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *identity = manifest->mutable_identity();")
+		writeCPPStringSetter(buf, 3, "identity", "set_schema", identity.GetSchema())
+		writeCPPStringSetter(buf, 3, "identity", "set_uuid", identity.GetUuid())
+		writeCPPStringSetter(buf, 3, "identity", "set_given_name", identity.GetGivenName())
+		writeCPPStringSetter(buf, 3, "identity", "set_family_name", identity.GetFamilyName())
+		writeCPPStringSetter(buf, 3, "identity", "set_motto", identity.GetMotto())
+		writeCPPStringSetter(buf, 3, "identity", "set_composer", identity.GetComposer())
+		writeCPPStringSetter(buf, 3, "identity", "set_status", identity.GetStatus())
+		writeCPPStringSetter(buf, 3, "identity", "set_born", identity.GetBorn())
+		writeCPPStringSetter(buf, 3, "identity", "set_version", identity.GetVersion())
+		for _, alias := range identity.GetAliases() {
+			writeCPPStringAdder(buf, 3, "identity", "add_aliases", alias)
+		}
+		writeCLine(buf, 2, "}")
+	}
+	writeCPPStringSetter(buf, 2, "manifest", "set_description", manifest.GetDescription())
+	writeCPPStringSetter(buf, 2, "manifest", "set_lang", manifest.GetLang())
+	for _, skill := range manifest.GetSkills() {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *skill = manifest->add_skills();")
+		writeCPPStringSetter(buf, 3, "skill", "set_name", skill.GetName())
+		writeCPPStringSetter(buf, 3, "skill", "set_description", skill.GetDescription())
+		writeCPPStringSetter(buf, 3, "skill", "set_when", skill.GetWhen())
+		for _, step := range skill.GetSteps() {
+			writeCPPStringAdder(buf, 3, "skill", "add_steps", step)
+		}
+		writeCLine(buf, 2, "}")
+	}
+	writeCPPStringSetter(buf, 2, "manifest", "set_kind", manifest.GetKind())
+	if build := manifest.GetBuild(); build != nil {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *build = manifest->mutable_build();")
+		writeCPPStringSetter(buf, 3, "build", "set_runner", build.GetRunner())
+		writeCPPStringSetter(buf, 3, "build", "set_main", build.GetMain())
+		writeCLine(buf, 2, "}")
+	}
+	if requires := manifest.GetRequires(); requires != nil {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *requires = manifest->mutable_requires();")
+		for _, command := range requires.GetCommands() {
+			writeCPPStringAdder(buf, 3, "requires", "add_commands", command)
+		}
+		for _, file := range requires.GetFiles() {
+			writeCPPStringAdder(buf, 3, "requires", "add_files", file)
+		}
+		for _, platform := range requires.GetPlatforms() {
+			writeCPPStringAdder(buf, 3, "requires", "add_platforms", platform)
+		}
+		writeCLine(buf, 2, "}")
+	}
+	if artifacts := manifest.GetArtifacts(); artifacts != nil {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *artifacts = manifest->mutable_artifacts();")
+		writeCPPStringSetter(buf, 3, "artifacts", "set_binary", artifacts.GetBinary())
+		writeCPPStringSetter(buf, 3, "artifacts", "set_primary", artifacts.GetPrimary())
+		writeCLine(buf, 2, "}")
+	}
+	for _, sequence := range manifest.GetSequences() {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *sequence = manifest->add_sequences();")
+		writeCPPStringSetter(buf, 3, "sequence", "set_name", sequence.GetName())
+		writeCPPStringSetter(buf, 3, "sequence", "set_description", sequence.GetDescription())
+		for _, param := range sequence.GetParams() {
+			writeCLine(buf, 3, "{")
+			writeCLine(buf, 4, "auto *param = sequence->add_params();")
+			writeCPPStringSetter(buf, 4, "param", "set_name", param.GetName())
+			writeCPPStringSetter(buf, 4, "param", "set_description", param.GetDescription())
+			writeCPPBoolSetter(buf, 4, "param", "set_required", param.GetRequired())
+			writeCPPStringSetter(buf, 4, "param", "set_default", param.GetDefault())
+			writeCLine(buf, 3, "}")
+		}
+		for _, step := range sequence.GetSteps() {
+			writeCPPStringAdder(buf, 3, "sequence", "add_steps", step)
+		}
+		writeCLine(buf, 2, "}")
+	}
+	writeCLine(buf, 1, "}")
+}
+
+func writeCPPServiceDoc(buf *strings.Builder, service *holonsv1.ServiceDoc) {
+	if service == nil {
+		return
+	}
+
+	writeCLine(buf, 1, "{")
+	writeCLine(buf, 2, "auto *service = response.add_services();")
+	writeCPPStringSetter(buf, 2, "service", "set_name", service.GetName())
+	writeCPPStringSetter(buf, 2, "service", "set_description", service.GetDescription())
+	for _, method := range service.GetMethods() {
+		writeCLine(buf, 2, "{")
+		writeCLine(buf, 3, "auto *method = service->add_methods();")
+		writeCPPStringSetter(buf, 3, "method", "set_name", method.GetName())
+		writeCPPStringSetter(buf, 3, "method", "set_description", method.GetDescription())
+		writeCPPStringSetter(buf, 3, "method", "set_input_type", method.GetInputType())
+		writeCPPStringSetter(buf, 3, "method", "set_output_type", method.GetOutputType())
+		for _, field := range method.GetInputFields() {
+			writeCPPFieldDoc(buf, 3, "method->add_input_fields()", field)
+		}
+		for _, field := range method.GetOutputFields() {
+			writeCPPFieldDoc(buf, 3, "method->add_output_fields()", field)
+		}
+		writeCPPBoolSetter(buf, 3, "method", "set_client_streaming", method.GetClientStreaming())
+		writeCPPBoolSetter(buf, 3, "method", "set_server_streaming", method.GetServerStreaming())
+		writeCPPStringSetter(buf, 3, "method", "set_example_input", method.GetExampleInput())
+		writeCLine(buf, 2, "}")
+	}
+	writeCLine(buf, 1, "}")
+}
+
+func writeCPPFieldDoc(buf *strings.Builder, indent int, target string, field *holonsv1.FieldDoc) {
+	if field == nil {
+		return
+	}
+
+	writeCLine(buf, indent, "{")
+	writeCLine(buf, indent+1, "auto *field = "+target+";")
+	writeCPPStringSetter(buf, indent+1, "field", "set_name", field.GetName())
+	writeCPPStringSetter(buf, indent+1, "field", "set_type", field.GetType())
+	writeCPPInt32Setter(buf, indent+1, "field", "set_number", field.GetNumber())
+	writeCPPStringSetter(buf, indent+1, "field", "set_description", field.GetDescription())
+	writeCLine(buf, indent+1, fmt.Sprintf("field->set_label(static_cast<holons::v1::FieldLabel>(%d));", field.GetLabel()))
+	writeCPPStringSetter(buf, indent+1, "field", "set_map_key_type", field.GetMapKeyType())
+	writeCPPStringSetter(buf, indent+1, "field", "set_map_value_type", field.GetMapValueType())
+	for _, nested := range field.GetNestedFields() {
+		writeCPPFieldDoc(buf, indent+1, "field->add_nested_fields()", nested)
+	}
+	for _, value := range field.GetEnumValues() {
+		writeCLine(buf, indent+1, "{")
+		writeCLine(buf, indent+2, "auto *value = field->add_enum_values();")
+		writeCPPStringSetter(buf, indent+2, "value", "set_name", value.GetName())
+		writeCPPInt32Setter(buf, indent+2, "value", "set_number", value.GetNumber())
+		writeCPPStringSetter(buf, indent+2, "value", "set_description", value.GetDescription())
+		writeCLine(buf, indent+1, "}")
+	}
+	writeCPPBoolSetter(buf, indent+1, "field", "set_required", field.GetRequired())
+	writeCPPStringSetter(buf, indent+1, "field", "set_example", field.GetExample())
+	writeCLine(buf, indent, "}")
+}
+
+func writeCPPStringSetter(buf *strings.Builder, indent int, target, setter, value string) {
+	if value == "" {
+		return
+	}
+	writeCLine(buf, indent, fmt.Sprintf("%s->%s(%s);", target, setter, strconv.Quote(value)))
+}
+
+func writeCPPStringAdder(buf *strings.Builder, indent int, target, adder, value string) {
+	writeCLine(buf, indent, fmt.Sprintf("%s->%s(%s);", target, adder, strconv.Quote(value)))
+}
+
+func writeCPPBoolSetter(buf *strings.Builder, indent int, target, setter string, value bool) {
+	if !value {
+		return
+	}
+	writeCLine(buf, indent, fmt.Sprintf("%s->%s(true);", target, setter))
+}
+
+func writeCPPInt32Setter(buf *strings.Builder, indent int, target, setter string, value int32) {
+	if value == 0 {
+		return
+	}
+	writeCLine(buf, indent, fmt.Sprintf("%s->%s(%d);", target, setter, value))
 }
