@@ -149,6 +149,19 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 			}()
 		}
 
+		if !ctx.DryRun {
+			restoreDescribeSource, describeErr := generateDescribeSource(target.Manifest, reporter)
+			if describeErr != nil {
+				err = fmt.Errorf("describe source: %w", describeErr)
+				break
+			}
+			defer func() {
+				if err != nil {
+					restoreDescribeSource()
+				}
+			}()
+		}
+
 		restoreFn, tmplErr := processTemplates(target.Manifest, reporter)
 		if tmplErr != nil {
 			err = fmt.Errorf("template processing: %w", tmplErr)
