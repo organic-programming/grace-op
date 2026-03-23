@@ -4,18 +4,19 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"time"
 
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
 	dopkg "github.com/organic-programming/grace-op/internal/do"
-	inspectpkg "github.com/organic-programming/grace-op/internal/inspect"
+	grpcclientpkg "github.com/organic-programming/grace-op/internal/grpcclient"
 	toolspkg "github.com/organic-programming/grace-op/internal/tools"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/grpc"
 )
 
 const protocolVersion = "2025-06-18"
@@ -25,15 +26,19 @@ type Server struct {
 	tools   []toolspkg.Definition
 	prompts []promptDefinition
 
-	toolIndex   map[string]toolBinding
-	promptIndex map[string]promptDefinition
+	toolIndex     map[string]toolBinding
+	promptIndex   map[string]promptDefinition
+	connCache     map[string]*grpc.ClientConn
+	describeCache map[string]*holonsv1.DescribeResponse
 }
 
 type toolBinding struct {
-	slug       string
-	definition toolspkg.Definition
-	method     *inspectpkg.MethodBinding
-	sequence   *inspectpkg.Sequence
+	slug            string
+	definition      toolspkg.Definition
+	fullMethod      string
+	clientStreaming bool
+	serverStreaming bool
+	sequence        *holonsv1.HolonManifest_Sequence
 }
 
 type promptDefinition struct {
@@ -73,69 +78,121 @@ type textContent struct {
 	Text string `json:"text"`
 }
 
-// NewServer loads one or more local holons and prepares MCP tool/prompt state.
+// NewServer connects to one or more holons via Describe and prepares MCP
+// tool/prompt state from the runtime schema.
 func NewServer(slugs []string, version string) (*Server, error) {
 	if len(slugs) == 0 {
 		return nil, fmt.Errorf("at least one <slug> is required")
 	}
 
-	catalogs := make([]*inspectpkg.LocalCatalog, 0, len(slugs))
+	connCache := make(map[string]*grpc.ClientConn, len(slugs))
+	describeCache := make(map[string]*holonsv1.DescribeResponse, len(slugs))
+	definitions := make([]toolspkg.Definition, 0)
+	toolIndex := make(map[string]toolBinding)
+	toolNamesBySlug := make(map[string][]string, len(slugs))
+
 	for _, slug := range slugs {
-		catalog, err := inspectpkg.LoadLocal(slug)
+		conn, err := sdkconnect.Connect(slug)
 		if err != nil {
+			_ = closeConnections(connCache)
 			return nil, err
 		}
-		catalogs = append(catalogs, catalog)
-	}
+		connCache[slug] = conn
 
-	definitions := toolspkg.DefinitionsForCatalogs(catalogs)
-	toolIndex := make(map[string]toolBinding, len(definitions))
-	for _, catalog := range catalogs {
-		for i := range catalog.Methods {
-			method := catalog.Methods[i]
-			name := method.ToolName(catalog.Slug)
-			for _, definition := range definitions {
-				if definition.Name != name {
+		describeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		response, err := holonsv1.NewHolonMetaClient(conn).Describe(describeCtx, &holonsv1.DescribeRequest{})
+		cancel()
+		if err != nil {
+			_ = closeConnections(connCache)
+			return nil, fmt.Errorf("describe %s: %w", slug, err)
+		}
+
+		describeCache[slug] = response
+
+		slugDefinitions := toolspkg.DefinitionsFromDescribe(slug, response)
+		definitionIndex := make(map[string]toolspkg.Definition, len(slugDefinitions))
+		for _, definition := range slugDefinitions {
+			definitions = append(definitions, definition)
+			definitionIndex[definition.Name] = definition
+			toolNamesBySlug[slug] = append(toolNamesBySlug[slug], definition.Name)
+		}
+
+		for _, service := range response.GetServices() {
+			serviceName := shortName(service.GetName())
+			if serviceName == "" {
+				continue
+			}
+			for _, method := range service.GetMethods() {
+				methodName := strings.TrimSpace(method.GetName())
+				if methodName == "" {
 					continue
 				}
-				toolIndex[name] = toolBinding{
-					slug:       catalog.Slug,
-					definition: definition,
-					method:     &method,
-				}
-				break
-			}
-		}
-		for i := range catalog.Document.Sequences {
-			sequence := catalog.Document.Sequences[i]
-			name := catalog.Slug + ".sequence." + sequence.Name
-			for _, definition := range definitions {
-				if definition.Name != name {
+
+				name := strings.TrimSpace(slug) + "." + serviceName + "." + methodName
+				definition, ok := definitionIndex[name]
+				if !ok {
 					continue
 				}
+
 				toolIndex[name] = toolBinding{
-					slug:       catalog.Slug,
-					definition: definition,
-					sequence:   &sequence,
+					slug:            slug,
+					definition:      definition,
+					fullMethod:      "/" + strings.TrimSpace(service.GetName()) + "/" + methodName,
+					clientStreaming: method.GetClientStreaming(),
+					serverStreaming: method.GetServerStreaming(),
 				}
-				break
+			}
+		}
+
+		for _, sequence := range response.GetManifest().GetSequences() {
+			sequenceName := strings.TrimSpace(sequence.GetName())
+			if sequenceName == "" {
+				continue
+			}
+
+			name := strings.TrimSpace(slug) + ".sequence." + sequenceName
+			definition, ok := definitionIndex[name]
+			if !ok {
+				continue
+			}
+
+			toolIndex[name] = toolBinding{
+				slug:       slug,
+				definition: definition,
+				sequence:   sequence,
 			}
 		}
 	}
 
-	prompts := buildPromptDefinitions(catalogs)
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].Name < definitions[j].Name
+	})
+
+	prompts := buildPromptDefinitions(slugs, describeCache, toolNamesBySlug)
 	promptIndex := make(map[string]promptDefinition, len(prompts))
 	for _, prompt := range prompts {
 		promptIndex[prompt.Name] = prompt
 	}
 
 	return &Server{
-		version:     version,
-		tools:       definitions,
-		prompts:     prompts,
-		toolIndex:   toolIndex,
-		promptIndex: promptIndex,
+		version:       version,
+		tools:         definitions,
+		prompts:       prompts,
+		toolIndex:     toolIndex,
+		promptIndex:   promptIndex,
+		connCache:     connCache,
+		describeCache: describeCache,
 	}, nil
+}
+
+// Close releases cached holon connections.
+func (s *Server) Close() error {
+	if s == nil {
+		return nil
+	}
+	err := closeConnections(s.connCache)
+	s.connCache = nil
+	return err
 }
 
 // ServeStdio runs the MCP server over newline-delimited JSON-RPC on stdio.
@@ -263,7 +320,7 @@ func (s *Server) handleToolCall(ctx context.Context, params json.RawMessage) (ma
 		return s.handleSequenceCall(request.Name, binding, request.Arguments)
 	}
 
-	if binding.method == nil {
+	if strings.TrimSpace(binding.fullMethod) == "" {
 		return map[string]any{
 			"content": []textContent{{
 				Type: "text",
@@ -273,7 +330,7 @@ func (s *Server) handleToolCall(ctx context.Context, params json.RawMessage) (ma
 		}, nil
 	}
 
-	if binding.method.Descriptor.IsStreamingClient() || binding.method.Descriptor.IsStreamingServer() {
+	if binding.clientStreaming || binding.serverStreaming {
 		return map[string]any{
 			"content": []textContent{{
 				Type: "text",
@@ -291,33 +348,19 @@ func (s *Server) handleToolCall(ctx context.Context, params json.RawMessage) (ma
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := sdkconnect.Connect(binding.slug)
-	if err != nil {
+	conn := s.connCache[binding.slug]
+	if conn == nil {
 		return map[string]any{
 			"content": []textContent{{
 				Type: "text",
-				Text: fmt.Sprintf("connect %s: %v", binding.slug, err),
+				Text: fmt.Sprintf("connect %s: no cached connection", binding.slug),
 			}},
 			"isError": true,
 		}, nil
 	}
-	defer func() { _ = sdkconnect.Disconnect(conn) }()
 
-	inputMsg := dynamicpb.NewMessage(binding.method.Descriptor.Input())
-	if len(args) > 0 && string(args) != "{}" {
-		if err := protojson.Unmarshal(args, inputMsg); err != nil {
-			return map[string]any{
-				"content": []textContent{{
-					Type: "text",
-					Text: fmt.Sprintf("invalid tool arguments for %s: %v", request.Name, err),
-				}},
-				"isError": true,
-			}, nil
-		}
-	}
-
-	outputMsg := dynamicpb.NewMessage(binding.method.Descriptor.Output())
-	if err := conn.Invoke(callCtx, binding.method.FullMethod(), inputMsg, outputMsg); err != nil {
+	result, err := grpcclientpkg.InvokeConn(callCtx, conn, binding.fullMethod, string(args))
+	if err != nil {
 		return map[string]any{
 			"content": []textContent{{
 				Type: "text",
@@ -327,32 +370,20 @@ func (s *Server) handleToolCall(ctx context.Context, params json.RawMessage) (ma
 		}, nil
 	}
 
-	outputJSON, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(outputMsg)
-	if err != nil {
-		return map[string]any{
-			"content": []textContent{{
-				Type: "text",
-				Text: fmt.Sprintf("marshal response for %s failed: %v", request.Name, err),
-			}},
-			"isError": true,
-		}, nil
-	}
-
 	var structured map[string]any
-	if err := json.Unmarshal(outputJSON, &structured); err != nil {
+	if err := json.Unmarshal([]byte(result.Output), &structured); err != nil {
 		return map[string]any{
 			"content": []textContent{{
 				Type: "text",
-				Text: string(outputJSON),
+				Text: result.Output,
 			}},
 		}, nil
 	}
 
-	pretty, _ := json.MarshalIndent(structured, "", "  ")
 	return map[string]any{
 		"content": []textContent{{
 			Type: "text",
-			Text: string(pretty),
+			Text: result.Output,
 		}},
 		"structuredContent": structured,
 	}, nil
@@ -397,24 +428,24 @@ func (s *Server) promptSummaries() []promptDefinition {
 	return out
 }
 
-func buildPromptDefinitions(catalogs []*inspectpkg.LocalCatalog) []promptDefinition {
+func buildPromptDefinitions(
+	slugs []string,
+	responses map[string]*holonsv1.DescribeResponse,
+	toolNamesBySlug map[string][]string,
+) []promptDefinition {
 	out := make([]promptDefinition, 0)
-	for _, catalog := range catalogs {
-		if catalog == nil {
+	for _, slug := range slugs {
+		response := responses[slug]
+		if response == nil {
 			continue
 		}
-		toolNames := make([]string, 0, len(catalog.Methods))
-		for _, method := range catalog.Methods {
-			toolNames = append(toolNames, method.ToolName(catalog.Slug))
-		}
-		for _, sequence := range catalog.Document.Sequences {
-			toolNames = append(toolNames, catalog.Slug+".sequence."+sequence.Name)
-		}
+
+		toolNames := append([]string(nil), toolNamesBySlug[slug]...)
 		sort.Strings(toolNames)
 
-		for _, skill := range catalog.Document.Skills {
+		for _, skill := range response.GetManifest().GetSkills() {
 			var text strings.Builder
-			fmt.Fprintf(&text, "Holon: %s\n", catalog.Slug)
+			fmt.Fprintf(&text, "Holon: %s\n", slug)
 			if strings.TrimSpace(skill.Description) != "" {
 				fmt.Fprintf(&text, "Goal: %s\n", strings.TrimSpace(skill.Description))
 			}
@@ -435,8 +466,8 @@ func buildPromptDefinitions(catalogs []*inspectpkg.LocalCatalog) []promptDefinit
 			}
 
 			out = append(out, promptDefinition{
-				Name:        catalog.Slug + "." + skill.Name,
-				Description: skill.Description,
+				Name:        slug + "." + skill.GetName(),
+				Description: skill.GetDescription(),
 				Text:        strings.TrimSpace(text.String()),
 			})
 		}
@@ -450,6 +481,34 @@ func buildPromptDefinitions(catalogs []*inspectpkg.LocalCatalog) []promptDefinit
 
 func bytesTrimSpace(data []byte) []byte {
 	return []byte(strings.TrimSpace(string(data)))
+}
+
+func closeConnections(connCache map[string]*grpc.ClientConn) error {
+	if len(connCache) == 0 {
+		return nil
+	}
+
+	errs := make([]error, 0)
+	for slug, conn := range connCache {
+		if conn == nil {
+			continue
+		}
+		if err := sdkconnect.Disconnect(conn); err != nil {
+			errs = append(errs, fmt.Errorf("disconnect %s: %w", slug, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func shortName(name string) string {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(name), ".")
+	if trimmed == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(trimmed, "."); idx >= 0 {
+		return trimmed[idx+1:]
+	}
+	return trimmed
 }
 
 func (s *Server) handleSequenceCall(name string, binding toolBinding, args map[string]any) (map[string]any, error) {

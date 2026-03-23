@@ -2383,6 +2383,9 @@ func writeCLISharedManifestProto(t *testing.T, root string) {
 	t.Helper()
 
 	source := filepath.Join(cliRepoRoot(t), "_protos", "holons", "v1", "manifest.proto")
+	if _, err := os.Stat(source); err != nil {
+		source = filepath.Join(cliRepoRoot(t), "holons", "grace-op", "_protos", "holons", "v1", "manifest.proto")
+	}
 	data, err := os.ReadFile(source)
 	if err != nil {
 		t.Fatalf("read %s: %v", source, err)

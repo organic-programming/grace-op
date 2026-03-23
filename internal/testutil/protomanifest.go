@@ -39,6 +39,9 @@ func WriteManifestFile(path, body string) error {
 
 func EnsureManifestSupport(dir string) error {
 	source := filepath.Join(repoRoot(), "_protos", "holons", "v1", "manifest.proto")
+	if _, err := os.Stat(source); err != nil {
+		source = filepath.Join(repoRoot(), "holons", "grace-op", "_protos", "holons", "v1", "manifest.proto")
+	}
 	data, err := os.ReadFile(source)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", source, err)

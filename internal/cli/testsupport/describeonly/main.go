@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -13,32 +12,10 @@ import (
 
 	"github.com/organic-programming/go-holons/pkg/describe"
 	"github.com/organic-programming/go-holons/pkg/transport"
-	echov1 "github.com/organic-programming/grace-op/internal/cli/testsupport/echoholon/protos/echo/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
 
 const defaultListenURI = "tcp://127.0.0.1:0"
-
-type server struct {
-	echov1.UnimplementedEchoServiceServer
-}
-
-func (server) Ping(_ context.Context, request *echov1.PingRequest) (*echov1.PingResponse, error) {
-	message := request.GetMessage()
-	switch request.GetMode() {
-	case echov1.EchoMode_ECHO_MODE_UPPER:
-		message = strings.ToUpper(message)
-	case echov1.EchoMode_ECHO_MODE_LOWER:
-		message = strings.ToLower(message)
-	}
-
-	return &echov1.PingResponse{
-		Message: message,
-		Count:   int32(len(request.GetTags())),
-		Mode:    request.GetMode(),
-	}, nil
-}
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
@@ -56,12 +33,10 @@ func main() {
 	defer listener.Close()
 
 	grpcServer := grpc.NewServer()
-	echov1.RegisterEchoServiceServer(grpcServer, server{})
 	if err := describe.Register(grpcServer, ".", "."); err != nil {
 		fmt.Fprintf(os.Stderr, "register describe failed: %v\n", err)
 		os.Exit(1)
 	}
-	reflection.Register(grpcServer)
 
 	serveErrCh := make(chan error, 1)
 	go func() {

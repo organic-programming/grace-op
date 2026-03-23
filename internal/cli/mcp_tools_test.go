@@ -293,6 +293,14 @@ func TestToolsCommandOpenAIFormat(t *testing.T) {
 func runMCPConversation(t *testing.T, args []string, requests []map[string]any) ([]map[string]any, string, int) {
 	t.Helper()
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeHome := filepath.Join(cwd, ".runtime")
+	t.Setenv("OPPATH", runtimeHome)
+	t.Setenv("OPBIN", filepath.Join(runtimeHome, "bin"))
+
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -440,6 +448,19 @@ message BuildResponse {
 `
 	if err := os.WriteFile(filepath.Join(dir, "protos", "rob_go", "v1", "rob_go.proto"), []byte(proto), 0o644); err != nil {
 		t.Fatal(err)
+	}
+
+	binaryPath := filepath.Join(dir, ".op", "build", "bin", "rob-go")
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	repoRoot := graceOpRepoRoot(t)
+	cmd := exec.Command("go", "build", "-o", binaryPath, "./internal/cli/testsupport/describeonly")
+	cmd.Dir = repoRoot
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build rob-go holon: %v\n%s", err, string(output))
 	}
 }
 

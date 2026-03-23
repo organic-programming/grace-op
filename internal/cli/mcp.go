@@ -19,6 +19,7 @@ func cmdMCP(args []string, version string) int {
 		fmt.Fprintf(os.Stderr, "op mcp: %v\n", err)
 		return 1
 	}
+	defer func() { _ = server.Close() }()
 
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "op mcp: %v\n", err)
