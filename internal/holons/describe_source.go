@@ -2,6 +2,7 @@ package holons
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"go/format"
 	"os"
@@ -14,6 +15,7 @@ import (
 	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	godescribe "github.com/organic-programming/go-holons/pkg/describe"
 	"github.com/organic-programming/grace-op/internal/progress"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -206,7 +208,18 @@ func renderDescribeTemplate(templatePath, outputPath string, response *holonsv1.
 }
 
 func describeTemplateFuncs(ext string) template.FuncMap {
-	funcs := template.FuncMap{}
+	funcs := template.FuncMap{
+		"protoBase64": func(message proto.Message) (string, error) {
+			if message == nil {
+				return "", nil
+			}
+			data, err := proto.Marshal(message)
+			if err != nil {
+				return "", fmt.Errorf("marshal proto message: %w", err)
+			}
+			return base64.StdEncoding.EncodeToString(data), nil
+		},
+	}
 	if ext == "go" {
 		funcs["goDescribeResponse"] = func(response *holonsv1.DescribeResponse) string {
 			return goDescribeResponseLiteral(response)
