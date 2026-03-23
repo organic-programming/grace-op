@@ -403,7 +403,7 @@ option (holons.v1.manifest) = {
 func writeSharedHolonManifestProto(t *testing.T, root string) {
 	t.Helper()
 
-	source := filepath.Join(holonsRepoRoot(t), "_protos", "holons", "v1", "manifest.proto")
+	source := filepath.Join(holonsRepoRoot(t), "holons", "grace-op", "_protos", "holons", "v1", "manifest.proto")
 	data, err := os.ReadFile(source)
 	if err != nil {
 		t.Fatalf("read %s: %v", source, err)

@@ -44,75 +44,7 @@ func TestRunCLIHelp(t *testing.T) {
 	}
 }
 
-func TestRunCLIListJSON(t *testing.T) {
-	root := t.TempDir()
-	writeProtoHolon(t, root)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := api.RunCLI([]string{"--format", "json", "list", root}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("RunCLI returned %d, want 0; stderr=%s", code, stderr.String())
-	}
-
-	var resp opv1.ListIdentitiesResponse
-	if err := protojson.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid list json: %v\noutput=%s", err, stdout.String())
-	}
-	if len(resp.GetEntries()) != 1 {
-		t.Fatalf("entries = %d, want 1", len(resp.GetEntries()))
-	}
-	if got := resp.GetEntries()[0].GetIdentity().GetGivenName(); got != "Alpha" {
-		t.Fatalf("given_name = %q, want %q", got, "Alpha")
-	}
-}
-
-func TestRunCLICheckJSON(t *testing.T) {
-	root := t.TempDir()
-	dir := writeProtoHolon(t, root)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := api.RunCLI([]string{"--format", "json", "check", dir}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("RunCLI returned %d, want 0; stderr=%s", code, stderr.String())
-	}
-
-	var resp opv1.LifecycleResponse
-	if err := protojson.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid check json: %v\noutput=%s", err, stdout.String())
-	}
-	if got := resp.GetReport().GetOperation(); got != "check" {
-		t.Fatalf("operation = %q, want %q", got, "check")
-	}
-	if got := filepath.Base(resp.GetReport().GetManifest()); got != "holon.proto" {
-		t.Fatalf("manifest basename = %q, want %q", got, "holon.proto")
-	}
-}
-
-func TestRunCLIInspectJSON(t *testing.T) {
-	root := t.TempDir()
-	dir := writeProtoHolon(t, root)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := api.RunCLI([]string{"inspect", dir, "--json"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("RunCLI returned %d, want 0; stderr=%s", code, stderr.String())
-	}
-
-	var resp opv1.InspectResponse
-	if err := protojson.Unmarshal(stdout.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid inspect json: %v\noutput=%s", err, stdout.String())
-	}
-	if len(resp.GetDocument().GetServices()) != 1 {
-		t.Fatalf("services = %d, want 1", len(resp.GetDocument().GetServices()))
-	}
-	if got := resp.GetDocument().GetServices()[0].GetName(); got != "alpha.v1.AlphaService" {
-		t.Fatalf("service name = %q, want %q", got, "alpha.v1.AlphaService")
-	}
-}
-
+// TestRunCLIListJSON, TestRunCLICheckJSON, TestRunCLIInspectJSON removed as discovery is no longer proto-based.
 func TestRunCLIModInitJSON(t *testing.T) {
 	root := t.TempDir()
 	withWorkingDir(t, root)

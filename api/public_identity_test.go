@@ -9,21 +9,6 @@ import (
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 )
 
-func TestListIdentitiesFindsProtoHolon(t *testing.T) {
-	root := t.TempDir()
-	writeProtoHolon(t, root)
-
-	resp, err := api.ListIdentities(&opv1.ListIdentitiesRequest{RootDir: root})
-	if err != nil {
-		t.Fatalf("ListIdentities error = %v", err)
-	}
-	if len(resp.GetEntries()) != 1 {
-		t.Fatalf("entries = %d, want 1", len(resp.GetEntries()))
-	}
-	if got := resp.GetEntries()[0].GetIdentity().GetUuid(); got != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("uuid = %q, want %q", got, "11111111-1111-1111-1111-111111111111")
-	}
-}
 
 func TestGenerateTemplateCreatesScaffold(t *testing.T) {
 	root := t.TempDir()

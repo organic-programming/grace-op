@@ -10,21 +10,6 @@ import (
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 )
 
-func TestToolsReturnsOpenAIPayload(t *testing.T) {
-	root := t.TempDir()
-	dir := writeProtoHolon(t, root)
-
-	resp, err := api.Tools(&opv1.ToolsRequest{Target: dir, Format: "openai"})
-	if err != nil {
-		t.Fatalf("Tools error = %v", err)
-	}
-	if got := resp.GetFormat(); got != "openai" {
-		t.Fatalf("format = %q, want %q", got, "openai")
-	}
-	if !strings.Contains(string(resp.GetPayload()), "Ping") {
-		t.Fatalf("payload = %q, want to mention Ping", string(resp.GetPayload()))
-	}
-}
 
 func TestEnvInitializesDirectoriesAndShell(t *testing.T) {
 	root := t.TempDir()

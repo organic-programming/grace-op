@@ -271,7 +271,7 @@ func TestResolveUsesHolonProtoOnly(t *testing.T) {
 func writeSharedManifestProto(t *testing.T, root string) {
 	t.Helper()
 
-	source := filepath.Join("..", "..", "..", "..", "_protos", "holons", "v1", "manifest.proto")
+	source := filepath.Join("..", "..", "..", "..", "holons", "grace-op", "_protos", "holons", "v1", "manifest.proto")
 	data, err := os.ReadFile(source)
 	if err != nil {
 		t.Fatalf("ReadFile(%q) failed: %v", source, err)
