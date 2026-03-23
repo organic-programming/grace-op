@@ -444,7 +444,7 @@ Each adapter inherits the security stack from PROTOCOL.md:
 | MCP | Inherited from transport (stdio = local trust) |
 | mTLS mesh | Client certificate from mesh CA |
 
-Per-listener security from `holon.yaml`:
+Per-listener security from `xxxx.yaml`:
 
 ```yaml
 proxy:
