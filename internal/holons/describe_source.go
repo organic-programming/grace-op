@@ -1235,15 +1235,15 @@ func writeCPPHolonManifest(buf *strings.Builder, manifest *holonsv1.HolonManifes
 	}
 	if requires := manifest.GetRequires(); requires != nil {
 		writeCLine(buf, 2, "{")
-		writeCLine(buf, 3, "auto *requires = manifest->mutable_requires();")
+		writeCLine(buf, 3, "auto *manifest_requires = manifest->mutable_requires_();")
 		for _, command := range requires.GetCommands() {
-			writeCPPStringAdder(buf, 3, "requires", "add_commands", command)
+			writeCPPStringAdder(buf, 3, "manifest_requires", "add_commands", command)
 		}
 		for _, file := range requires.GetFiles() {
-			writeCPPStringAdder(buf, 3, "requires", "add_files", file)
+			writeCPPStringAdder(buf, 3, "manifest_requires", "add_files", file)
 		}
 		for _, platform := range requires.GetPlatforms() {
-			writeCPPStringAdder(buf, 3, "requires", "add_platforms", platform)
+			writeCPPStringAdder(buf, 3, "manifest_requires", "add_platforms", platform)
 		}
 		writeCLine(buf, 2, "}")
 	}

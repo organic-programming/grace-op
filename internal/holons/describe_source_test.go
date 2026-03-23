@@ -386,6 +386,13 @@ func TestRenderDescribeTemplateFromCPPSDKBuildsStaticResponseSource(t *testing.T
 	if !strings.Contains(content, "identity->set_given_name(\"Sample\");") {
 		t.Fatal("rendered output missing manifest identity wiring")
 	}
+	if strings.Contains(content, "auto *requires = manifest->mutable_requires();") ||
+		strings.Contains(content, "auto *requires = manifest->mutable_requires_();") {
+		t.Fatal("rendered output should avoid C++20 reserved keywords")
+	}
+	if !strings.Contains(content, "auto *manifest_requires = manifest->mutable_requires_();") {
+		t.Fatal("rendered output missing escaped requires binding")
+	}
 	if !strings.Contains(content, "static_cast<holons::v1::FieldLabel>(3)") {
 		t.Fatal("rendered output missing field label literal")
 	}
