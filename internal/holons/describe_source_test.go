@@ -91,6 +91,34 @@ func TestExecuteLifecycleBuildGeneratesDescribeSource(t *testing.T) {
 	}
 }
 
+func TestExecuteLifecycleBuildGeneratesDescribeSourceFromAPIV1Layout(t *testing.T) {
+	if _, err := execLookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+	dir := writeProtoGoHolonFixture(t, root, "describe-source-api-layout")
+	copyRepoGoDescribeTemplate(t, root)
+	writeDescribeAPIProtoFixture(t, dir)
+
+	_, err := ExecuteLifecycle(OperationBuild, dir)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "gen", "describe_generated.go")
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read generated describe source: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "test.v1.Echo") {
+		t.Fatal("generated describe source missing api/v1 service name")
+	}
+}
+
 func TestRenderDescribeTemplateFromGoSDKCompiles(t *testing.T) {
 	if _, err := execLookPath("go"); err != nil {
 		t.Skip("go command not available")
@@ -194,6 +222,37 @@ message PingRequest {
 
 message PingResponse {
   // Message returned by the service.
+  string message = 1;
+}
+`
+	if err := os.WriteFile(protoPath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write proto fixture: %v", err)
+	}
+}
+
+func writeDescribeAPIProtoFixture(t *testing.T, dir string) {
+	t.Helper()
+
+	protoPath := filepath.Join(dir, "api", "v1", "echo.proto")
+	if err := os.MkdirAll(filepath.Dir(protoPath), 0o755); err != nil {
+		t.Fatalf("mkdir proto dir: %v", err)
+	}
+
+	const source = `syntax = "proto3";
+
+package test.v1;
+
+// Echo responds with the request payload for api/v1 describe generation tests.
+service Echo {
+  // Ping echoes the inbound message.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
   string message = 1;
 }
 `

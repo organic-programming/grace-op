@@ -42,7 +42,7 @@ func generateDescribeSource(manifest *LoadedManifest, reporter progress.Reporter
 		return restore, nil
 	}
 
-	response, err := godescribe.BuildResponse(filepath.Join(manifest.Dir, "proto"), manifest.Path)
+	response, err := godescribe.BuildResponse(describeProtoDir(manifest), manifest.Path)
 	if err != nil {
 		return restore, fmt.Errorf("build describe response: %w", err)
 	}
@@ -55,6 +55,20 @@ func generateDescribeSource(manifest *LoadedManifest, reporter progress.Reporter
 
 	reporter.Step(fmt.Sprintf("incode description: %s", workspaceRelativePath(outputPath)))
 	return restore, nil
+}
+
+func describeProtoDir(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+
+	candidate := filepath.Join(manifest.Dir, "proto")
+	info, err := os.Stat(candidate)
+	if err == nil && info.IsDir() {
+		return candidate
+	}
+
+	return manifest.Dir
 }
 
 func findDescribeTemplate(holonDir, lang string) (path string, ext string, err error) {

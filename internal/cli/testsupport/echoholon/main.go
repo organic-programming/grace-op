@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	"github.com/organic-programming/go-holons/pkg/describe"
 	"github.com/organic-programming/go-holons/pkg/transport"
 	echov1 "github.com/organic-programming/grace-op/internal/cli/testsupport/echoholon/protos/echo/v1"
@@ -57,7 +58,8 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 	echov1.RegisterEchoServiceServer(grpcServer, server{})
-	if err := describe.Register(grpcServer, ".", "."); err != nil {
+	describe.UseStaticResponse(echoDescribeResponse())
+	if err := describe.Register(grpcServer); err != nil {
 		fmt.Fprintf(os.Stderr, "register describe failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -146,4 +148,98 @@ func shutdown(server *grpc.Server) {
 
 func isStdioURI(uri string) bool {
 	return strings.TrimSpace(uri) == "stdio://"
+}
+
+func echoDescribeResponse() *holonsv1.DescribeResponse {
+	return &holonsv1.DescribeResponse{
+		Manifest: &holonsv1.HolonManifest{
+			Identity: &holonsv1.HolonManifest_Identity{
+				Schema:     "holon/v1",
+				Uuid:       "grace-op-echoholon-0000",
+				GivenName:  "Echo",
+				FamilyName: "Server",
+				Motto:      "Echo what you send.",
+				Composer:   "test",
+				Status:     "draft",
+				Born:       "2026-03-08",
+				Aliases:    []string{"echo", "echo-server"},
+			},
+			Lang: "go",
+			Skills: []*holonsv1.HolonManifest_Skill{{
+				Name:        "repeat-back",
+				Description: "Echo user text back with optional tags.",
+				When:        "User wants a safe connectivity smoke test.",
+				Steps: []string{
+					"Call EchoService.Ping with the text to echo.",
+					"Inspect the returned message, tag count, and mode.",
+				},
+			}},
+		},
+		Services: []*holonsv1.ServiceDoc{{
+			Name:        "echo.v1.EchoService",
+			Description: "Echoes request payloads for MCP integration tests.",
+			Methods: []*holonsv1.MethodDoc{{
+				Name:         "Ping",
+				Description:  "Echo the request payload.",
+				InputType:    "echo.v1.PingRequest",
+				OutputType:   "echo.v1.PingResponse",
+				ExampleInput: `{"message":"hello","tags":["one","two"],"mode":"ECHO_MODE_UPPER"}`,
+				InputFields: []*holonsv1.FieldDoc{
+					{
+						Name:        "message",
+						Type:        "string",
+						Number:      1,
+						Description: "Message to echo back.",
+						Label:       holonsv1.FieldLabel_FIELD_LABEL_REQUIRED,
+						Required:    true,
+						Example:     `"hello"`,
+					},
+					{
+						Name:        "tags",
+						Type:        "string",
+						Number:      2,
+						Description: "Tags to include in the response count.",
+						Label:       holonsv1.FieldLabel_FIELD_LABEL_REPEATED,
+						Example:     `["one","two"]`,
+					},
+					{
+						Name:        "mode",
+						Type:        "echo.v1.EchoMode",
+						Number:      3,
+						Description: "Output mode.",
+						EnumValues: []*holonsv1.EnumValueDoc{
+							{Name: "ECHO_MODE_UNSPECIFIED", Number: 0},
+							{Name: "ECHO_MODE_UPPER", Number: 1},
+							{Name: "ECHO_MODE_LOWER", Number: 2},
+						},
+					},
+				},
+				OutputFields: []*holonsv1.FieldDoc{
+					{
+						Name:        "message",
+						Type:        "string",
+						Number:      1,
+						Description: "Echoed text.",
+					},
+					{
+						Name:        "count",
+						Type:        "int32",
+						Number:      2,
+						Description: "Number of tags seen.",
+					},
+					{
+						Name:        "mode",
+						Type:        "echo.v1.EchoMode",
+						Number:      3,
+						Description: "Mode chosen by the caller.",
+						EnumValues: []*holonsv1.EnumValueDoc{
+							{Name: "ECHO_MODE_UNSPECIFIED", Number: 0},
+							{Name: "ECHO_MODE_UPPER", Number: 1},
+							{Name: "ECHO_MODE_LOWER", Number: 2},
+						},
+					},
+				},
+			}},
+		}},
+	}
 }

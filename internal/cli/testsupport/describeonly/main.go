@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	holonsv1 "github.com/organic-programming/go-holons/gen/go/holons/v1"
 	"github.com/organic-programming/go-holons/pkg/describe"
 	"github.com/organic-programming/go-holons/pkg/transport"
 	"google.golang.org/grpc"
@@ -33,7 +34,8 @@ func main() {
 	defer listener.Close()
 
 	grpcServer := grpc.NewServer()
-	if err := describe.Register(grpcServer, ".", "."); err != nil {
+	describe.UseStaticResponse(describeOnlyResponse())
+	if err := describe.Register(grpcServer); err != nil {
 		fmt.Fprintf(os.Stderr, "register describe failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -121,4 +123,47 @@ func shutdown(server *grpc.Server) {
 
 func isStdioURI(uri string) bool {
 	return strings.TrimSpace(uri) == "stdio://"
+}
+
+func describeOnlyResponse() *holonsv1.DescribeResponse {
+	return &holonsv1.DescribeResponse{
+		Manifest: &holonsv1.HolonManifest{
+			Identity: &holonsv1.HolonManifest_Identity{
+				Schema:     "holon/v1",
+				Uuid:       "mcp-test-rob-go",
+				GivenName:  "Rob",
+				FamilyName: "Go",
+				Motto:      "Build what you mean.",
+				Composer:   "test",
+				Status:     "draft",
+				Born:       "2026-03-08",
+				Aliases:    []string{"rob-go", "rob"},
+			},
+			Lang: "go",
+		},
+		Services: []*holonsv1.ServiceDoc{{
+			Name:        "rob_go.v1.RobGoService",
+			Description: "Wraps the go command for gRPC access.",
+			Methods: []*holonsv1.MethodDoc{{
+				Name:        "Build",
+				Description: "Compile Go packages.",
+				InputType:   "rob_go.v1.BuildRequest",
+				OutputType:  "rob_go.v1.BuildResponse",
+				InputFields: []*holonsv1.FieldDoc{{
+					Name:        "package",
+					Type:        "string",
+					Number:      1,
+					Description: "The Go package to build.",
+					Label:       holonsv1.FieldLabel_FIELD_LABEL_REQUIRED,
+					Required:    true,
+				}},
+				OutputFields: []*holonsv1.FieldDoc{{
+					Name:        "output",
+					Type:        "string",
+					Number:      1,
+					Description: "Compiler output.",
+				}},
+			}},
+		}},
+	}
 }
