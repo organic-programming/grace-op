@@ -355,7 +355,7 @@ Example:
 ```protobuf
 option (holons.v1.manifest) = {
   identity: { ... }
-  guide: "# Gabriel Greeting Go\n\nA multilingual greeting holon.\n\n## Usage\n\n```bash\nop gabriel-greeting-go SayHello '{\"name\":\"Alice\",\"lang_code\":\"fr\"}'\n```\n\n## Supported Languages\n\n56 languages with culturally appropriate default names.\n"
+  guide: "# Gabriel Greeting Go\n\nA multilingual greeting holon.\n\n## Usage\n\n```bash\nop gabriel-greeting-go SayHello '{\"name\":\"Bob\",\"lang_code\":\"fr\"}'\n```\n\n## Supported Languages\n\n56 languages with culturally appropriate default names.\n"
 };
 ```
 
@@ -411,7 +411,7 @@ but RPCs have semantic requirements.
 ```protobuf
 message SayHelloRequest {
   // Name to greet. If empty, falls back to a localized default.
-  // @example "Alice"
+  // @example "Bob"
   string name = 1;
 
   // ISO 639-1 code chosen by the UI.
@@ -432,7 +432,7 @@ Provides a concrete example value.
 
 ```protobuf
 // Greets the user in the chosen language.
-// @example {"name":"Alice","lang_code":"fr"}
+// @example {"name":"Bob","lang_code":"fr"}
 rpc SayHello(SayHelloRequest) returns (SayHelloResponse);
 ```
 
@@ -610,7 +610,7 @@ option (holons.v1.manifest) = {
       "op gabriel-greeting-go SayHello '{\"name\":\"{{ .name }}\",\"lang_code\":\"en\"}'",
     ]
   }]
-  guide: "# Gabriel Greeting Go\n\nA multilingual greeting service.\n\n## Quick Start\n\n```bash\nop gabriel-greeting-go SayHello '{\"name\":\"Alice\",\"lang_code\":\"fr\"}'\n```\n\n## 56 Languages\n\nGabriel covers 56 languages with localized templates and culturally\nappropriate default names (Marie in French, マリア in Japanese).\n"
+  guide: "# Gabriel Greeting Go\n\nA multilingual greeting service.\n\n## Quick Start\n\n```bash\nop gabriel-greeting-go SayHello '{\"name\":\"Bob\",\"lang_code\":\"fr\"}'\n```\n\n## 56 Languages\n\nGabriel covers 56 languages with localized templates and culturally\nappropriate default names (Marie in French, マリア in Japanese).\n"
 };
 ```
 

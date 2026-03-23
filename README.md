@@ -71,10 +71,10 @@ op test my-service
 op install my-service
 
 # Dispatch commands
-op my-service SayHello '{"name":"Alice"}'
+op my-service SayHello '{"name":"Bob"}'
 
 # Direct transport
-op grpc+stdio://my-service SayHello '{"name":"Alice"}'
+op grpc+stdio://my-service SayHello '{"name":"Bob"}'
 
 # Discover and inspect
 op list

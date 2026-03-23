@@ -165,9 +165,9 @@ Print the resolved environment:
 
 ```
 $ op env
-OPPATH=/Users/alice/.op
-OPBIN=/Users/alice/.op/bin
-ROOT=/Users/alice/organic-programming
+OPPATH=/Users/Bob/.op
+OPBIN=/Users/Bob/.op/bin
+ROOT=/Users/Bob/organic-programming
 ```
 
 ### `op env --init`
@@ -176,9 +176,9 @@ Create the runtime directory structure:
 
 ```
 $ op env --init
-created /Users/alice/.op/
-created /Users/alice/.op/bin/
-created /Users/alice/.op/cache/
+created /Users/Bob/.op/
+created /Users/Bob/.op/bin/
+created /Users/Bob/.op/cache/
 ```
 
 ### `op env --shell`
@@ -540,8 +540,8 @@ Gabriel Greeting Go go    deterministic/pure       draft   local   gabriel-greet
 Gabriel Greeting C  c     deterministic/pure       draft   local   gabriel-greeting-c    d1e2f3a4-...
 
 In $PATH:
-  op -> /Users/alice/.op/bin/op
-  rob-go -> /Users/alice/.op/bin/rob-go
+  op -> /Users/Bob/.op/bin/op
+  rob-go -> /Users/Bob/.op/bin/rob-go
 ```
 
 ### Search order
