@@ -133,6 +133,7 @@ OP commands:
   op do <holon> <sequence> [--param=value ...]
                                          run a declared manifest sequence
   op mcp <slug> [slug2...]               start an MCP server for one or more holons
+  op mcp <grpc+tcp://host:port>          start an MCP server for a running gRPC server
   op tools <slug> [--format <fmt>]       output tool definitions (openai, anthropic, mcp)
   op check [<holon-or-path>]             validate the holon manifest and prerequisites
   op build [<holon-or-path>] [flags]     build a holon artifact via its runner

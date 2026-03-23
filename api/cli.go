@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -145,6 +146,7 @@ OP commands:
   op mod <command>
   op env [--init] [--shell]
   op mcp <slug> [slug2...]
+  op mcp <grpc+tcp://host:port>
   op serve [--listen tcp://:9090]
   op version
 `)
@@ -221,17 +223,51 @@ func printJSON(w io.Writer, value any) error {
 }
 
 func (c cliState) runMCPCommand(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(c.stderr, "op mcp: requires at least one <slug>")
+	// Extract --listen flag if present.
+	var listenAddr string
+	var slugs []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--listen" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(c.stderr, "op mcp: --listen requires a value")
+				return 1
+			}
+			listenAddr = args[i+1]
+			i++
+		} else {
+			slugs = append(slugs, args[i])
+		}
+	}
+
+	if len(slugs) == 0 {
+		fmt.Fprintln(c.stderr, "op mcp: requires at least one <slug> or URI")
 		return 1
 	}
 
-	serverInstance, err := mcp.NewServer(args, c.version)
+	var serverInstance *mcp.Server
+	var err error
+
+	if len(slugs) == 1 && mcp.IsURI(slugs[0]) {
+		serverInstance, err = mcp.NewServerFromURI(slugs[0], c.version)
+	} else {
+		serverInstance, err = mcp.NewServer(slugs, c.version)
+	}
 	if err != nil {
 		fmt.Fprintf(c.stderr, "op mcp: %v\n", err)
 		return 1
 	}
-	if err := serverInstance.ServeStdio(nil, os.Stdin, c.stdout); err != nil {
+	defer func() { _ = serverInstance.Close() }()
+
+	if listenAddr != "" {
+		addr := mcp.ParseHTTPListenAddr(listenAddr)
+		if err := serverInstance.ServeHTTP(addr); err != nil {
+			fmt.Fprintf(c.stderr, "op mcp: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	if err := serverInstance.ServeStdio(context.Background(), os.Stdin, c.stdout); err != nil {
 		fmt.Fprintf(c.stderr, "op mcp: %v\n", err)
 		return 1
 	}
