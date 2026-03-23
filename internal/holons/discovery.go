@@ -705,16 +705,50 @@ func resolveDir(ref, dir string) (*Target, error) {
 		target.IdentityPath = resolved.SourcePath
 	}
 
-	if target.IdentityPath != "" {
-		manifest, loadErr := LoadManifest(absDir)
-		if loadErr != nil {
+	manifest, loadErr := LoadManifest(absDir)
+	if loadErr != nil {
+		if target.IdentityPath != "" || !errors.Is(loadErr, errProtoManifestNotFound) {
 			target.ManifestErr = loadErr
-		} else {
-			target.Manifest = manifest
 		}
+		return target, nil
+	}
+
+	target.Manifest = manifest
+	if target.IdentityPath == "" {
+		target.IdentityPath = manifest.Path
+	}
+	if target.Identity == nil {
+		id := identityFromLoadedManifest(manifest)
+		target.Identity = &id
 	}
 
 	return target, nil
+}
+
+func identityFromLoadedManifest(manifest *LoadedManifest) identity.Identity {
+	if manifest == nil {
+		return identity.Identity{}
+	}
+
+	return identity.Identity{
+		Schema:       manifest.Manifest.Schema,
+		UUID:         manifest.Manifest.UUID,
+		GivenName:    manifest.Manifest.GivenName,
+		FamilyName:   manifest.Manifest.FamilyName,
+		Motto:        manifest.Manifest.Motto,
+		Composer:     manifest.Manifest.Composer,
+		Clade:        manifest.Manifest.Clade,
+		Status:       manifest.Manifest.Status,
+		Born:         manifest.Manifest.Born,
+		Version:      manifest.Manifest.Version,
+		Parents:      append([]string(nil), manifest.Manifest.Parents...),
+		Reproduction: manifest.Manifest.Reproduction,
+		Aliases:      append([]string(nil), manifest.Manifest.Aliases...),
+		GeneratedBy:  manifest.Manifest.GeneratedBy,
+		Lang:         manifest.Manifest.Lang,
+		ProtoStatus:  manifest.Manifest.ProtoStatus,
+		Description:  manifest.Manifest.Description,
+	}
 }
 
 func existingTargetDir(ref string) (string, bool, error) {

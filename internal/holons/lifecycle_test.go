@@ -114,6 +114,65 @@ func TestLoadManifestFromProtoForCargo(t *testing.T) {
 	}
 }
 
+func TestResolveTargetBySlugForProtoManifest(t *testing.T) {
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+	dir := writeProtoGoHolonFixture(t, root, "demo-proto")
+
+	target, err := ResolveTarget("demo-proto")
+	if err != nil {
+		t.Fatalf("ResolveTarget returned error: %v", err)
+	}
+	gotDir, err := filepath.EvalSymlinks(target.Dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(target.Dir) failed: %v", err)
+	}
+	wantDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(dir) failed: %v", err)
+	}
+	if gotDir != wantDir {
+		t.Fatalf("target dir = %q, want %q", gotDir, wantDir)
+	}
+	if target.ManifestErr != nil {
+		t.Fatalf("target manifest error = %v", target.ManifestErr)
+	}
+	if target.Manifest == nil {
+		t.Fatal("target manifest should be loaded")
+	}
+	if target.Identity == nil {
+		t.Fatal("target identity should be loaded")
+	}
+	if got := target.Identity.Slug(); got != "demo-proto" {
+		t.Fatalf("identity slug = %q, want %q", got, "demo-proto")
+	}
+}
+
+func TestResolveTargetLoadsRepoGraceOP(t *testing.T) {
+	root := holonsRepoRoot(t)
+	chdirForHolonTest(t, root)
+
+	target, err := ResolveTarget("op")
+	if err != nil {
+		t.Fatalf("ResolveTarget(op) returned error: %v", err)
+	}
+	if target.ManifestErr != nil {
+		t.Fatalf("target manifest error = %v", target.ManifestErr)
+	}
+	if target.Manifest == nil {
+		t.Fatal("target manifest should be loaded")
+	}
+	if target.Identity == nil {
+		t.Fatal("target identity should be loaded")
+	}
+	if got := target.Identity.Slug(); got != "grace-op" {
+		t.Fatalf("identity slug = %q, want %q", got, "grace-op")
+	}
+	if got := filepath.Base(target.Manifest.Path); got != identity.ProtoManifestFileName {
+		t.Fatalf("manifest path basename = %q, want %q", got, identity.ProtoManifestFileName)
+	}
+}
+
 func TestExecuteLifecycleBuildGoModuleFromProtoManifest(t *testing.T) {
 	if _, err := execLookPath("go"); err != nil {
 		t.Skip("go command not available")
