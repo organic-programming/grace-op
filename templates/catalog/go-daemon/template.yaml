@@ -1,7 +1,0 @@
-name: go-daemon
-description: Native Go daemon holon
-lang: go
-params:
-  - name: service
-    description: Service name
-    default: "{{ .FamilyTitle | pascal }}Service"
