@@ -71,6 +71,7 @@ func cmdWhoNew(format Format, globalQuiet bool, args []string) int {
 	ui, args, _ := extractQuietFlag(args)
 	quiet := globalQuiet || ui.Quiet
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 
 	if usesTemplateMode(args) {
 		return cmdTemplateNew(format, quiet, args)
@@ -152,6 +153,7 @@ func cmdTemplateNew(format Format, quiet bool, args []string) int {
 	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	printer.Step("rendering template " + templateName + "...")
 	result, err := scaffold.Generate(templateName, slug, scaffold.GenerateOptions{Overrides: overrides})
 	if err != nil {

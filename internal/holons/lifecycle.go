@@ -3,6 +3,7 @@ package holons
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/organic-programming/grace-op/internal/identity"
 	"github.com/organic-programming/grace-op/internal/progress"
@@ -32,20 +34,22 @@ const (
 
 // BuildOptions captures CLI/build request overrides before manifest defaults are applied.
 type BuildOptions struct {
-	Target   string
-	Mode     string
-	DryRun   bool
-	NoSign   bool
-	Progress progress.Reporter
+	Target    string
+	Mode      string
+	DryRun    bool
+	NoSign    bool
+	Progress  progress.Reporter
+	composite *compositeBuildExecution
 }
 
 // BuildContext is the canonical build request used by runners and artifact resolution.
 type BuildContext struct {
-	Target   string
-	Mode     string
-	DryRun   bool
-	NoSign   bool
-	Progress progress.Reporter
+	Target    string
+	Mode      string
+	DryRun    bool
+	NoSign    bool
+	Progress  progress.Reporter
+	composite *compositeBuildExecution
 }
 
 type Report struct {
@@ -65,11 +69,29 @@ type Report struct {
 	Children    []Report `json:"children,omitempty"`
 }
 
+type compositeDependencyNode struct {
+	key       string
+	label     string
+	dir       string
+	manifest  *LoadedManifest
+	dependsOn []string
+}
+
+type compositeBuildSession struct {
+	nodes     map[string]*compositeDependencyNode
+	completed map[string]Report
+}
+
+type compositeBuildExecution struct {
+	session                *compositeBuildSession
+	skipDependencyPrebuild bool
+}
+
 type runner interface {
 	check(*LoadedManifest, BuildContext) error
 	build(*LoadedManifest, BuildContext, *Report) error
 	test(*LoadedManifest, BuildContext, *Report) error
-	clean(*LoadedManifest, *Report) error
+	clean(*LoadedManifest, BuildContext, *Report) error
 }
 
 // ExecuteLifecycle runs a lifecycle operation on a holon.
@@ -101,6 +123,12 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 	if op != OperationBuild {
 		ctx.DryRun = false
 	}
+
+	if op == OperationBuild && progress.BuildReporterLabel(reporter) == "" {
+		if writer := progress.WriterFromReporter(reporter); writer != nil {
+			reporter = progress.NewBuildReporter(writer, buildProgressLabel(target))
+		}
+	}
 	ctx.Progress = reporter
 
 	report := baseReport(op, target, ctx)
@@ -125,6 +153,20 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 		report.Notes = append(report.Notes, "manifest and prerequisites validated")
 		return report, nil
 	case OperationBuild:
+		if shouldPrebuildCompositeDependencies(target.Manifest, ctx) {
+			session, childReports, prepErr := prebuildCompositeDependencies(target.Manifest, ctx)
+			report.Children = append(report.Children, childReports...)
+			if prepErr != nil {
+				err = prepErr
+				break
+			}
+			ctx.composite = &compositeBuildExecution{
+				session:                session,
+				skipDependencyPrebuild: true,
+			}
+			ctx.Progress = reporter
+		}
+
 		// Proto stage: stage, parse, and compile descriptors.
 		if !ctx.DryRun {
 			if err := protoStage(target.Manifest, reporter); err != nil {
@@ -186,8 +228,7 @@ func ExecuteLifecycle(op Operation, ref string, opts ...BuildOptions) (Report, e
 	case OperationTest:
 		err = r.test(target.Manifest, ctx, &report)
 	case OperationClean:
-		reporter.Step("removing .op/...")
-		err = r.clean(target.Manifest, &report)
+		err = r.clean(target.Manifest, ctx, &report)
 	default:
 		err = fmt.Errorf("unsupported operation %q", op)
 	}
@@ -259,6 +300,331 @@ func baseReport(op Operation, target *Target, ctx BuildContext) Report {
 		}
 	}
 	return report
+}
+
+func buildProgressLabel(target *Target) string {
+	if target == nil {
+		return ""
+	}
+	if target.Identity != nil {
+		if slug := strings.TrimSpace(target.Identity.Slug()); slug != "" {
+			return slug
+		}
+	}
+	if target.Manifest != nil {
+		if slug := manifestSlug(target.Manifest); slug != "" {
+			return slug
+		}
+	}
+	return filepath.Base(target.Dir)
+}
+
+func shouldPrebuildCompositeDependencies(manifest *LoadedManifest, ctx BuildContext) bool {
+	if manifest == nil {
+		return false
+	}
+	if ctx.composite != nil && ctx.composite.skipDependencyPrebuild {
+		return false
+	}
+	return manifest.Manifest.Kind == KindComposite &&
+		manifest.Manifest.Build.Runner == RunnerRecipe &&
+		!isAggregateBuildTarget(ctx.Target)
+}
+
+func prebuildCompositeDependencies(manifest *LoadedManifest, ctx BuildContext) (*compositeBuildSession, []Report, error) {
+	session := &compositeBuildSession{
+		nodes:     make(map[string]*compositeDependencyNode),
+		completed: make(map[string]Report),
+	}
+
+	order, err := resolveCompositeDependencyOrder(manifest, session)
+	if err != nil {
+		return session, nil, err
+	}
+	if len(order) == 0 {
+		return session, nil, nil
+	}
+
+	writer := progress.WriterFromReporter(ctx.Progress)
+	reports := make([]Report, 0, len(order))
+	for _, node := range order {
+		dependencyStart := time.Now()
+		if !ctx.DryRun && dependencyIsFresh(node.manifest, ctx) {
+			report := dependencyFreshReport(node, ctx)
+			session.completed[node.key] = report
+			reports = append(reports, report)
+			if writer != nil {
+				writer.FreezeAt(buildSuccessLine(node.label), dependencyStart)
+			}
+			continue
+		}
+
+		var depReporter progress.Reporter = progress.Silence()
+		if writer != nil {
+			depReporter = progress.NewBuildReporterWithStart(writer, node.label, dependencyStart)
+		}
+
+		childReport, buildErr := ExecuteLifecycle(OperationBuild, node.dir, BuildOptions{
+			Target:    ctx.Target,
+			Mode:      ctx.Mode,
+			DryRun:    ctx.DryRun,
+			NoSign:    ctx.NoSign,
+			Progress:  depReporter,
+			composite: &compositeBuildExecution{session: session, skipDependencyPrebuild: true},
+		})
+		session.completed[node.key] = childReport
+		reports = append(reports, childReport)
+		if buildErr != nil {
+			return session, reports, fmt.Errorf("dependency %q: %w", node.label, buildErr)
+		}
+		if writer != nil {
+			writer.FreezeAt(buildSuccessLine(node.label), dependencyStart)
+		}
+	}
+
+	return session, reports, nil
+}
+
+func resolveCompositeDependencyOrder(manifest *LoadedManifest, session *compositeBuildSession) ([]*compositeDependencyNode, error) {
+	if manifest == nil {
+		return nil, nil
+	}
+	if session == nil {
+		session = &compositeBuildSession{
+			nodes:     make(map[string]*compositeDependencyNode),
+			completed: make(map[string]Report),
+		}
+	}
+
+	order := make([]*compositeDependencyNode, 0)
+	visited := make(map[string]bool)
+	visiting := make(map[string]bool)
+	stack := make([]string, 0)
+
+	var visit func(*compositeDependencyNode) error
+	visit = func(node *compositeDependencyNode) error {
+		if node == nil {
+			return nil
+		}
+		if visited[node.key] {
+			return nil
+		}
+		if visiting[node.key] {
+			cycle := append(append([]string(nil), stack...), node.label)
+			return fmt.Errorf("composite dependency cycle: %s", strings.Join(cycle, " -> "))
+		}
+
+		visiting[node.key] = true
+		stack = append(stack, node.label)
+		for _, depKey := range node.dependsOn {
+			if err := visit(session.nodes[depKey]); err != nil {
+				return err
+			}
+		}
+		stack = stack[:len(stack)-1]
+		visiting[node.key] = false
+		visited[node.key] = true
+		order = append(order, node)
+		return nil
+	}
+
+	directMembers, err := compositeHolonMembers(manifest, session)
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range directMembers {
+		if err := visit(node); err != nil {
+			return nil, err
+		}
+	}
+
+	return order, nil
+}
+
+func compositeHolonMembers(manifest *LoadedManifest, session *compositeBuildSession) ([]*compositeDependencyNode, error) {
+	nodes := make([]*compositeDependencyNode, 0)
+	for _, member := range manifest.Manifest.Build.Members {
+		if member.Type != "holon" {
+			continue
+		}
+		memberDir, err := manifest.ResolveManifestPath(member.Path)
+		if err != nil {
+			return nil, fmt.Errorf("recipe member %q path: %w", member.ID, err)
+		}
+		node, err := compositeNodeForDir(memberDir, session)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
+}
+
+func compositeNodeForDir(dir string, session *compositeBuildSession) (*compositeDependencyNode, error) {
+	memberManifest, err := LoadManifest(dir)
+	if err != nil {
+		return nil, err
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(memberManifest.Dir); resolveErr == nil {
+		memberManifest.Dir = resolved
+	}
+
+	key := compositeDependencyKey(memberManifest)
+	if existing, ok := session.nodes[key]; ok {
+		return existing, nil
+	}
+
+	node := &compositeDependencyNode{
+		key:      key,
+		label:    manifestSlug(memberManifest),
+		dir:      memberManifest.Dir,
+		manifest: memberManifest,
+	}
+	session.nodes[key] = node
+
+	dependencies, err := compositeHolonMembers(memberManifest, session)
+	if err != nil {
+		return nil, err
+	}
+	node.dependsOn = make([]string, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		node.dependsOn = append(node.dependsOn, dependency.key)
+	}
+
+	return node, nil
+}
+
+func compositeDependencyKey(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	if uuid := strings.TrimSpace(manifest.Manifest.UUID); uuid != "" {
+		return uuid
+	}
+	resolvedDir, err := filepath.EvalSymlinks(manifest.Dir)
+	if err == nil {
+		return resolvedDir
+	}
+	return filepath.Clean(manifest.Dir)
+}
+
+func manifestSlug(manifest *LoadedManifest) string {
+	if manifest == nil {
+		return ""
+	}
+	if binary := strings.TrimSpace(manifest.BinaryName()); binary != "" {
+		return binary
+	}
+	if manifest.Name != "" {
+		return strings.TrimSpace(manifest.Name)
+	}
+	name := strings.ToLower(strings.TrimSpace(manifest.Manifest.GivenName + "-" + strings.TrimSuffix(manifest.Manifest.FamilyName, "?")))
+	name = strings.ReplaceAll(name, " ", "-")
+	name = strings.Trim(name, "-")
+	if name != "" {
+		return name
+	}
+	return filepath.Base(manifest.Dir)
+}
+
+func dependencyFreshReport(node *compositeDependencyNode, ctx BuildContext) Report {
+	target := &Target{
+		Ref:          node.label,
+		Dir:          node.dir,
+		RelativePath: workspaceRelativePath(node.dir),
+		Manifest:     node.manifest,
+	}
+	report := baseReport(OperationBuild, target, ctx)
+	report.Notes = append(report.Notes, "fresh dependency — skipped rebuild")
+	return report
+}
+
+func dependencyIsFresh(manifest *LoadedManifest, ctx BuildContext) bool {
+	markerPath := buildFreshnessMarker(manifest, ctx)
+	if markerPath == "" {
+		return false
+	}
+	markerInfo, err := os.Stat(markerPath)
+	if err != nil || markerInfo.IsDir() {
+		return false
+	}
+	sourceModTime, err := latestSourceTreeModTime(manifest.Dir)
+	if err != nil {
+		return false
+	}
+	return !markerInfo.ModTime().Before(sourceModTime)
+}
+
+func buildFreshnessMarker(manifest *LoadedManifest, ctx BuildContext) string {
+	if manifest == nil {
+		return ""
+	}
+	if binaryPath := manifest.BinaryPath(); binaryPath != "" {
+		if info, err := os.Stat(binaryPath); err == nil && !info.IsDir() {
+			return binaryPath
+		}
+	}
+	holonJSONPath := filepath.Join(manifest.HolonPackageDir(), ".holon.json")
+	if info, err := os.Stat(holonJSONPath); err == nil && !info.IsDir() {
+		return holonJSONPath
+	}
+	artifactPath := manifest.ArtifactPath(ctx)
+	if artifactPath == "" {
+		return ""
+	}
+	if info, err := os.Stat(artifactPath); err == nil {
+		if info.IsDir() {
+			return filepath.Join(artifactPath, ".holon.json")
+		}
+		return artifactPath
+	}
+	return ""
+}
+
+func latestSourceTreeModTime(root string) (time.Time, error) {
+	var newest time.Time
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if shouldSkipSourceDir(filepath.Base(path), path, root) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		return nil
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return newest, nil
+}
+
+func shouldSkipSourceDir(name, path, root string) bool {
+	if filepath.Clean(path) == filepath.Clean(root) {
+		return false
+	}
+	switch name {
+	case ".git", ".op", "node_modules", "vendor", "build", "testdata":
+		return true
+	}
+	return strings.HasPrefix(name, ".")
+}
+
+func buildSuccessLine(label string) string {
+	return fmt.Sprintf("built %s… ✓", strings.TrimSpace(label))
+}
+
+func cleanSuccessLine(label string, elapsed time.Duration) string {
+	return fmt.Sprintf("✓ cleaned %s in %s", strings.TrimSpace(label), progress.FormatElapsed(elapsed))
 }
 
 func preflight(manifest *LoadedManifest, ctx BuildContext) error {
@@ -488,11 +854,12 @@ func resolveBuildContext(manifest *LoadedManifest, opts BuildOptions) (BuildCont
 	}
 
 	return BuildContext{
-		Target:   target,
-		Mode:     mode,
-		DryRun:   opts.DryRun,
-		NoSign:   opts.NoSign,
-		Progress: opts.Progress,
+		Target:    target,
+		Mode:      mode,
+		DryRun:    opts.DryRun,
+		NoSign:    opts.NoSign,
+		Progress:  opts.Progress,
+		composite: opts.composite,
 	}, nil
 }
 
@@ -566,7 +933,7 @@ func (goModuleRunner) test(manifest *LoadedManifest, ctx BuildContext, report *R
 	return nil
 }
 
-func (goModuleRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (goModuleRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}
@@ -647,7 +1014,7 @@ func (r cmakeRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Re
 	return nil
 }
 
-func (cmakeRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (cmakeRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}
@@ -798,6 +1165,21 @@ func (recipeRunner) stepBuildMember(manifest *LoadedManifest, ctx BuildContext, 
 		memberDir = resolved
 	}
 	report.Commands = append(report.Commands, "build_member "+memberID)
+
+	if ctx.composite != nil && ctx.composite.skipDependencyPrebuild {
+		node, nodeErr := compositeNodeForDir(memberDir, ctx.composite.session)
+		if nodeErr != nil {
+			return fmt.Errorf("build_member %q manifest: %w", memberID, nodeErr)
+		}
+		if _, ok := ctx.composite.session.completed[node.key]; !ok {
+			return fmt.Errorf("build_member %q has no prebuilt artifact", memberID)
+		}
+		if !ctx.DryRun {
+			report.Notes = append(report.Notes, fmt.Sprintf("used prebuilt member %q", memberID))
+		}
+		return nil
+	}
+
 	ctx.Progress.Step("building member: " + memberID)
 	childReport, err := ExecuteLifecycle(OperationBuild, memberDir, BuildOptions{
 		Target:   ctx.Target,
@@ -955,7 +1337,34 @@ func (recipeRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Rep
 	return nil
 }
 
-func (recipeRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (recipeRunner) clean(manifest *LoadedManifest, ctx BuildContext, report *Report) error {
+	writer := progress.WriterFromReporter(ctx.Progress)
+	for _, member := range manifest.Manifest.Build.Members {
+		if member.Type != "holon" {
+			continue
+		}
+
+		memberDir, err := manifest.ResolveManifestPath(member.Path)
+		if err != nil {
+			return fmt.Errorf("clean member %q path: %w", member.ID, err)
+		}
+		if resolved, err := filepath.EvalSymlinks(memberDir); err == nil {
+			memberDir = resolved
+		}
+
+		cleanStart := time.Now()
+		childReport, err := ExecuteLifecycle(OperationClean, memberDir, BuildOptions{
+			Progress: ctx.Progress.Child(),
+		})
+		report.Children = append(report.Children, childReport)
+		if err != nil {
+			return fmt.Errorf("clean member %q: %w", member.ID, err)
+		}
+		if writer != nil {
+			writer.FreezeAt(cleanSuccessLine(childReport.Holon, time.Since(cleanStart)), cleanStart)
+		}
+	}
+
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}

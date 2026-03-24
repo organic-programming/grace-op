@@ -1100,6 +1100,183 @@ artifacts:
 	}
 }
 
+func TestExecuteLifecycleBuildCompositeDependenciesReportTopologicalOrder(t *testing.T) {
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+
+	leafDir := filepath.Join(root, "leaf")
+	if err := os.MkdirAll(filepath.Join(leafDir, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leafDir, "work", "source.txt"), []byte("leaf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeManifest(t, leafDir, `schema: holon/v0
+kind: composite
+build:
+  runner: recipe
+  members:
+    - id: work
+      path: work
+      type: component
+  targets:
+    `+canonicalRuntimeTarget()+`:
+      steps:
+        - copy:
+            from: work/source.txt
+            to: work/output.txt
+artifacts:
+  primary: work/output.txt
+`)
+
+	parentDir := filepath.Join(root, "parent")
+	if err := os.MkdirAll(filepath.Join(parentDir, "work"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "work", "source.txt"), []byte("parent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeManifest(t, parentDir, `schema: holon/v0
+kind: composite
+build:
+  runner: recipe
+  members:
+    - id: leaf
+      path: ../leaf
+      type: holon
+    - id: work
+      path: work
+      type: component
+  targets:
+    `+canonicalRuntimeTarget()+`:
+      steps:
+        - build_member: leaf
+        - copy:
+            from: work/source.txt
+            to: work/output.txt
+artifacts:
+  primary: work/output.txt
+`)
+
+	writeRecipeManifest(t, root, `schema: holon/v0
+kind: composite
+build:
+  runner: recipe
+  members:
+    - id: parent
+      path: parent
+      type: holon
+  targets:
+    `+canonicalRuntimeTarget()+`:
+      steps:
+        - build_member: parent
+artifacts:
+  primary: parent/work/output.txt
+`)
+
+	report, err := ExecuteLifecycle(OperationBuild, root, BuildOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("dry run failed: %v", err)
+	}
+	if len(report.Children) != 2 {
+		t.Fatalf("children = %d, want 2", len(report.Children))
+	}
+	if got := []string{report.Children[0].Holon, report.Children[1].Holon}; !reflect.DeepEqual(got, []string{"leaf", "parent"}) {
+		t.Fatalf("child order = %v, want [leaf parent]", got)
+	}
+	if len(report.Children[1].Children) != 0 {
+		t.Fatalf("prebuilt parent child report should not recursively rebuild leaf, got %d nested children", len(report.Children[1].Children))
+	}
+	if !hasEntryContaining(report.Children[1].Commands, "build_member leaf") {
+		t.Fatalf("expected parent commands to retain build_member step, got %v", report.Children[1].Commands)
+	}
+}
+
+func TestExecuteLifecycleBuildCompositeUsesPrebuiltChildArtifact(t *testing.T) {
+	if _, err := execLookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+
+	childDir := filepath.Join(root, "child")
+	if err := os.MkdirAll(filepath.Join(childDir, "cmd", "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "go.mod"), []byte("module example.com/child\n\ngo 1.25.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "cmd", "child", "main.go"), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeManifest(t, childDir, `schema: holon/v0
+kind: native
+build:
+  runner: go-module
+requires:
+  commands: [go]
+  files: [go.mod]
+artifacts:
+  binary: child
+`)
+
+	if err := os.MkdirAll(filepath.Join(root, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRecipeManifest(t, root, `schema: holon/v0
+kind: composite
+build:
+  runner: recipe
+  members:
+    - id: child
+      path: child
+      type: holon
+    - id: app
+      path: app
+      type: component
+  targets:
+    `+canonicalRuntimeTarget()+`:
+      steps:
+        - build_member: child
+        - copy_artifact:
+            from: child
+            to: app/Holons/child.holon
+        - assert_file:
+            path: app/Holons/child.holon/.holon.json
+artifacts:
+  primary: app/Holons/child.holon/.holon.json
+`)
+
+	first, err := ExecuteLifecycle(OperationBuild, root)
+	if err != nil {
+		t.Fatalf("first build failed: %v", err)
+	}
+	if len(first.Children) != 1 {
+		t.Fatalf("first build children = %d, want 1", len(first.Children))
+	}
+	if !slices.Contains(first.Notes, `used prebuilt member "child"`) {
+		t.Fatalf("first build notes missing prebuilt-member note: %v", first.Notes)
+	}
+	if _, err := os.Stat(filepath.Join(root, "app", "Holons", "child.holon", ".holon.json")); err != nil {
+		t.Fatalf("copied child package missing .holon.json: %v", err)
+	}
+
+	second, err := ExecuteLifecycle(OperationBuild, root)
+	if err != nil {
+		t.Fatalf("second build failed: %v", err)
+	}
+	if len(second.Children) != 1 {
+		t.Fatalf("second build children = %d, want 1", len(second.Children))
+	}
+	if !hasEntryContaining(second.Children[0].Notes, "fresh dependency") {
+		t.Fatalf("second build should skip rebuilding the child, got child notes %v", second.Children[0].Notes)
+	}
+	if !slices.Contains(second.Notes, `used prebuilt member "child"`) {
+		t.Fatalf("second build notes missing prebuilt-member note: %v", second.Notes)
+	}
+}
+
 func TestRecipeRunnerAssertFilePass(t *testing.T) {
 	root := t.TempDir()
 	chdirForHolonTest(t, root)

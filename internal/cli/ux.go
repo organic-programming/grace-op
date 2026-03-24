@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/organic-programming/grace-op/internal/holons"
 	"github.com/organic-programming/grace-op/internal/progress"
@@ -15,7 +17,7 @@ type uiOptions struct {
 	Quiet bool
 }
 
-func commandProgress(format Format, quiet bool) *progress.Printer {
+func commandProgress(format Format, quiet bool) *progress.Writer {
 	if quiet || format == FormatJSON {
 		return progress.Silence()
 	}
@@ -46,11 +48,30 @@ func emitSuggestions(w io.Writer, format Format, quiet bool, ctx suggest.Context
 	suggest.Print(w, ctx)
 }
 
-func humanElapsed(p *progress.Printer) string {
+func humanElapsed(p *progress.Writer) string {
 	if p == nil {
 		return "0s"
 	}
 	return progress.FormatElapsed(p.Elapsed())
+}
+
+func runCleanWithProgress(printer *progress.Writer, target string) (holons.Report, error) {
+	cleanStart := time.Now()
+	report, err := holons.ExecuteLifecycle(holons.OperationClean, target, holons.BuildOptions{Progress: printer})
+	if err != nil {
+		if printer != nil {
+			printer.Keep()
+		}
+		return report, err
+	}
+	if printer != nil {
+		printer.FreezeAt(cleanSuccessMessage(report.Holon, cleanStart), cleanStart)
+	}
+	return report, nil
+}
+
+func cleanSuccessMessage(holon string, started time.Time) string {
+	return fmt.Sprintf("✓ cleaned %s in %s", holon, progress.FormatElapsed(time.Since(started)))
 }
 
 func manifestForSuggestions(ref string) (*holons.LoadedManifest, string) {

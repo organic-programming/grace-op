@@ -14,41 +14,71 @@ op — the Organic Programming CLI
 
 Global flags (must come before <holon> or URI):
   -f, --format <text|json>              output format for RPC responses (default: text)
-  -q, --quiet                           suppress progress output
+  -q, --quiet                           suppress progress and suggestions
 
 Holon dispatch (transport chain):
   op <holon> <command> [args]            dispatch via the SDK auto-connect chain
+  op <holon> --clean <method> [--no-build] [json]
+  op <holon> <method> [--no-build] [json]
+                                         call a holon RPC; auto-build compiled slugs if needed
 
 Direct gRPC URI dispatch:
-  op grpc://<slug|host:port> <method>     gRPC auto-connect for slugs, direct TCP for host:port
+  op grpc://<slug|host:port> <method>    gRPC auto-connect for slugs, direct TCP for host:port
   op grpc+tcp://<slug|host:port> <method> force gRPC over TCP
-  op grpc+stdio://<holon> <method>        force gRPC over stdio pipe
-  op grpc+unix://<path> <method>          gRPC over Unix socket
-  op grpc+ws://<host:port> <method>       gRPC over WebSocket
-  op grpc+wss://<host:port> <method>      gRPC over secure WebSocket
+  op grpc+stdio://<holon> <method>       force gRPC over stdio pipe (ephemeral)
+  op grpc+unix://<path> <method>         gRPC over Unix socket
+  op grpc+ws://<host:port> <method>      gRPC over WebSocket
+  op grpc+wss://<host:port> <method>     gRPC over secure WebSocket
+  op run <holon> [flags]                 build if needed, then launch in foreground
+  op run <holon>:<port>                  shorthand for --listen tcp://:<port>
 
 OP commands:
-  op list [root]
-  op show <uuid-or-prefix>
-  op new [--json <payload>]
-  op new --list
-  op new --template <name> <holon-name> [--set key=value]
-  op discover
-  op inspect <slug|host:port> [--json]
+  op list [root]                         list local + cached holons natively
+  op show <uuid-or-prefix>               display a holon identity natively
+  op new [--json <payload>]              create a holon identity natively
+  op new --list                          list shipped holon templates
+  op new --template <name> <holon-name>  generate a holon scaffold from a template
+  op inspect <slug|host:port> [--json]   inspect a holon's API offline or via Describe
   op do <holon> <sequence> [--param=value ...]
-  op tools <slug> [--format <fmt>]
-  op check [<holon-or-path>]
-  op build [<holon-or-path>] [flags]
-  op test [<holon-or-path>]
-  op clean [<holon-or-path>]
-  op run <holon> [flags]
-  op install [<holon-or-path>] [flags]
-  op uninstall <holon>
-  op mod <command>
-  op env [--init] [--shell]
-  op mcp <slug> [slug2...]
-  op serve [--listen tcp://:9090]
-  op version
+                                         run a declared manifest sequence
+  op mcp <slug> [slug2...]               start an MCP server for one or more holons
+  op mcp <grpc+tcp://host:port>          start an MCP server for a running gRPC server
+  op tools <slug> [--format <fmt>]       output tool definitions (openai, anthropic, mcp)
+  op check [<holon-or-path>]             validate the holon manifest and prerequisites
+  op build [<holon-or-path>] [flags]     build a holon artifact via its runner
+  op test [<holon-or-path>]              run a holon's test contract
+  op clean [<holon-or-path>]             remove .op/ build outputs
+  op install [<holon-or-path>] [flags]   install a pre-built artifact into $OPBIN
+  op uninstall <holon>                   remove an installed artifact from $OPBIN
+  op mod <command>                       manage holon.mod and holon.sum
+  op env [--init] [--shell]              print resolved OPPATH / OPBIN / ROOT
+
+Build flags:
+  --clean                                      clean before building (cannot be combined with --dry-run)
+  --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
+  --mode <debug|release|profile>               build mode (default: debug)
+  --dry-run                                    print resolved plan, do not execute
+  --no-sign                                    skip automatic ad-hoc signing for bundle artifacts
+
+Install flags:
+  --build                                      build before installing (default: install pre-built artifact as-is)
+  --link-applications                          symlink installed .app bundles into /Applications (macOS only)
+
+Run flags:
+  --clean                                      clean before building and running (cannot be combined with --no-build)
+  --listen <URI>                               listen address for service holons (default: stdio://)
+  --no-build                                   fail if the artifact is missing instead of building
+  --target <...>                               pass build target through if a build is needed
+  --mode <debug|release|profile>               pass build mode through if a build is needed
+
+Dispatch flag:
+  --clean                                      clean the slug target before auto-building and calling
+  --no-build                                   fail if a slug-based RPC target is missing its built binary
+
+  op discover                            list available holons
+  op serve [--listen tcp://:9090]        start OP's own gRPC server
+  op version                             show op version
+  op help [command]                      this message or topic help (build, run)
 ```
 
 
@@ -637,8 +667,8 @@ Build the primary artifact via the declared runner.
 ```bash
 $ op build                          # build current directory
 $ op build rob-go                   # build by name
+$ op build --clean rob-go           # clean first, then rebuild
 $ op build --target macos --mode release
-$ op build --config gpl             # select a named build config
 $ op build --dry-run                # print plan, don't execute
 ```
 
@@ -646,10 +676,11 @@ Flags:
 
 | Flag | Values | Default | Description |
 |---|---|---|---|
+| `--clean` | | | Run `op clean` before building. For composites, clean recurses through holon members first. Cannot be combined with `--dry-run`. |
 | `--target` | `macos`, `linux`, `windows`, `ios`, `ios-simulator`, `tvos`, `tvos-simulator`, `watchos`, `watchos-simulator`, `visionos`, `visionos-simulator`, `android`, `all` | current OS | Platform target |
 | `--mode` | `debug`, `release`, `profile` | `debug` | Build mode |
-| `--config` | any key from `build.configs` | `build.default_config` | Named build configuration |
 | `--dry-run` | | | Print resolved plan without executing |
+| `--no-sign` | | | Skip automatic ad-hoc signing for bundle artifacts |
 
 **Success contract**: a successful `op build` guarantees:
 1. The manifest was valid.
@@ -682,6 +713,10 @@ Remove the `.op/` build directory:
 $ op clean
 $ op clean rob-go
 ```
+
+For composite recipe holons, `op clean` is recursive by default: it
+cleans all holon members first, then removes the composite's own
+`.op/`.
 
 ### `op install [<holon-or-path>]`
 
@@ -898,6 +933,37 @@ The command is mapped to an RPC method name:
 | `show` | `ShowIdentity` |
 | *other* | used as-is (e.g. `build` → `Build`, `install` → `Install`) |
 
+### Auto-build
+
+When the target holon has no built binary, `op` builds it before calling.
+Build progress displays on stderr with elapsed time:
+
+```text
+00:00:01 building gabriel-greeting-swift…
+00:00:08 building gabriel-greeting-swift… linking
+```
+
+On success, progress is erased and only the call result appears on stdout.
+On failure, progress stays and the build error is shown.
+
+Composite holons build dependency members in topological order first. Each
+finished dependency freezes its own line with `✓`, then the next dependency
+starts on a new line.
+
+Interpreted holons (Go, Node, Python, Ruby, Dart) run from source without
+building. Like `go run`, the interpreter is launched directly.
+
+| Runner | Behavior |
+|--------|----------|
+| `go`, `go-module` | `go run <main>` — no build needed |
+| `node`, `typescript` | `node <main>` — no build needed |
+| `python` | `python3 <main>` — no build needed |
+| `ruby` | `ruby <main>` — no build needed |
+| `dart` | `dart run <main>` — no build needed |
+| `swift-package`, `gradle`, `cargo`, `cmake`, `dotnet` | Auto-builds via `op build` |
+
+To skip auto-build and fail immediately, use `--no-build`.
+
 ### Direct gRPC URI dispatch
 
 For fine-grained transport control, use URI syntax:
@@ -970,27 +1036,30 @@ RPCs is defined by the `.proto` file; current methods include:
 `Discover`, `Invoke`, `CreateIdentity`, `ShowIdentity`,
 `ListIdentities`.
 
-### `op run <holon>:<port>`
+### `op run <holon> [flags]`
 
-Start **any holon's gRPC server** as a background process:
+Launch a holon in the foreground. If the artifact is missing, `op run`
+builds it first.
 
 ```bash
-op run rob-go:9091                  # TCP shorthand
+op run rob-go
+op run --clean rob-go              # clean, rebuild, then run
+op run rob-go:9091                 # TCP shorthand
 op run gabriel-greeting-go --listen tcp://:9092
 op run gabriel-greeting-c --listen unix:///tmp/greeting.sock
 ```
 
-Under the hood:
-1. Resolve the holon binary.
-2. Launch: `<binary> serve --listen <URI>`.
-3. Detach the process.
-4. Print PID and listen URI.
+Flags:
 
-```
-$ op run rob-go:9091
-op run: started rob-go (pid 12345) on tcp://:9091
-op run: stop the process by PID using your platform's process tool
-```
+| Flag | Values | Default | Description |
+|---|---|---|---|
+| `--clean` | | | Run `op clean` before building and running. Cannot be combined with `--no-build`. |
+| `--listen` | any listen URI | `stdio://` | Listen address for service holons |
+| `--no-build` | | | Fail if the artifact is missing instead of building |
+| `--target` | same as `op build` | current OS | Build target to use if a build is needed |
+| `--mode` | `debug`, `release`, `profile` | `debug` | Build mode to use if a build is needed |
+
+When `--clean` is set, `op run` always performs `clean → build → run`.
 
 ### Transport URIs
 
@@ -1309,7 +1378,7 @@ configuration files.
 | Command | Description |
 |---|---|
 | `op check [<holon>]` | Validate manifest and prerequisites |
-| `op build [<holon>] [--target T] [--mode M] [--dry-run]` | Build primary artifact |
+| `op build [<holon>] [--clean] [--target T] [--mode M] [--dry-run] [--no-sign]` | Build primary artifact |
 | `op test [<holon>]` | Run test contract |
 | `op clean [<holon>]` | Remove `.op/` build outputs |
 | `op install [<holon>] [--no-build]` | Copy artifact to `$OPBIN` |
@@ -1346,8 +1415,8 @@ configuration files.
 
 | Command | Description |
 |---|---|
-| `op run <holon>:<port>` | Start holon gRPC server (TCP) |
-| `op run <holon> --listen <URI>` | Start holon server (any transport) |
+| `op run <holon> [--clean] [--listen <URI>]` | Build if needed, then launch in the foreground |
+| `op run <holon>:<port>` | Shorthand for `--listen tcp://:<port>` |
 | `op serve [--listen <URI>]` | Start op's own gRPC server |
 
 ### Dispatch
@@ -1355,7 +1424,10 @@ configuration files.
 | Command | Description |
 |---|---|
 | `op <holon> <command> [args]` | Transport-chain dispatch |
+| `op <holon> --clean <method> [--no-build] [json]` | Clean the slug target, auto-build it, then call the RPC |
+| `op <holon> <method> [--no-build] [json]` | Call a holon RPC; auto-build compiled slug targets if needed |
 | `op grpc://<host:port> [method]` | gRPC over TCP |
+| `op grpc://<slug> <method> [--no-build] [json]` | gRPC auto-connect for slug targets |
 | `op grpc+stdio://<holon> <method>` | gRPC over stdio pipe |
 | `op grpc+unix://<path> <method>` | gRPC over Unix socket |
 | `op grpc+ws://<host:port> <method>` | gRPC over WebSocket |

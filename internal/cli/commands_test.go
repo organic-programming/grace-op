@@ -34,6 +34,57 @@ func TestHelpCommand(t *testing.T) {
 	}
 }
 
+func TestHelpCommandIncludesCleanFlags(t *testing.T) {
+	output := captureStdout(t, func() {
+		code := Run([]string{"help"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("help returned %d, want 0", code)
+		}
+	})
+
+	for _, want := range []string{
+		"op <holon> --clean <method> [--no-build] [json]",
+		"--clean                                      clean before building (cannot be combined with --dry-run)",
+		"--clean                                      clean before building and running (cannot be combined with --no-build)",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestHelpBuildTopicIncludesCleanFlag(t *testing.T) {
+	output := captureStdout(t, func() {
+		code := Run([]string{"help", "build"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("help build returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(output, "--clean") {
+		t.Fatalf("help build missing --clean flag:\n%s", output)
+	}
+	if !strings.Contains(output, "cannot be combined with --dry-run") {
+		t.Fatalf("help build missing dry-run restriction:\n%s", output)
+	}
+}
+
+func TestHelpRunTopicIncludesCleanFlag(t *testing.T) {
+	output := captureStdout(t, func() {
+		code := Run([]string{"help", "run"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("help run returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(output, "--clean") {
+		t.Fatalf("help run missing --clean flag:\n%s", output)
+	}
+	if !strings.Contains(output, "cannot be combined with --no-build") {
+		t.Fatalf("help run missing no-build restriction:\n%s", output)
+	}
+}
+
 func TestRunWhoListThroughTransportChainWithoutBuiltInComposerFails(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)
@@ -221,11 +272,13 @@ func TestRunNewTemplateJSONOutput(t *testing.T) {
 
 func TestMapHolonCommandToRPC(t *testing.T) {
 	tests := []struct {
-		name       string
-		args       []string
-		wantMethod string
-		wantInput  string
-		wantErr    bool
+		name        string
+		args        []string
+		wantMethod  string
+		wantInput   string
+		wantClean   bool
+		wantNoBuild bool
+		wantErr     bool
 	}{
 		{
 			name:       "list default",
@@ -258,6 +311,31 @@ func TestMapHolonCommandToRPC(t *testing.T) {
 			wantInput:  "{}",
 		},
 		{
+			name:        "custom method with no-build and json",
+			args:        []string{"Ping", "--no-build", `{"message":"hello"}`},
+			wantMethod:  "Ping",
+			wantInput:   `{"message":"hello"}`,
+			wantNoBuild: true,
+		},
+		{
+			name:        "custom method with clean no-build and json",
+			args:        []string{"--clean", "Ping", "--no-build", `{"message":"hello"}`},
+			wantMethod:  "Ping",
+			wantInput:   `{"message":"hello"}`,
+			wantClean:   true,
+			wantNoBuild: true,
+		},
+		{
+			name:    "no-build must follow method",
+			args:    []string{"Ping", `{"message":"hello"}`, "--no-build"},
+			wantErr: true,
+		},
+		{
+			name:    "clean must precede method",
+			args:    []string{"Ping", "--clean", `{"message":"hello"}`},
+			wantErr: true,
+		},
+		{
 			name:    "show missing uuid",
 			args:    []string{"show"},
 			wantErr: true,
@@ -266,7 +344,7 @@ func TestMapHolonCommandToRPC(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			method, input, err := mapHolonCommandToRPC(tc.args)
+			method, input, cleanFirst, noBuild, err := mapHolonCommandToRPC(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -275,6 +353,12 @@ func TestMapHolonCommandToRPC(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("mapHolonCommandToRPC returned error: %v", err)
+			}
+			if cleanFirst != tc.wantClean {
+				t.Fatalf("cleanFirst = %t, want %t", cleanFirst, tc.wantClean)
+			}
+			if noBuild != tc.wantNoBuild {
+				t.Fatalf("noBuild = %t, want %t", noBuild, tc.wantNoBuild)
 			}
 			if method != tc.wantMethod {
 				t.Fatalf("method = %q, want %q", method, tc.wantMethod)
@@ -1109,10 +1193,11 @@ func TestBuildCommandEmitsProgressAndSuggestions(t *testing.T) {
 		t.Fatalf("stdout missing lifecycle report: %q", stdout)
 	}
 	for _, expected := range []string{
+		"building demo-holon…",
 		"checking manifest...",
 		"validating prerequisites...",
 		"go build -o",
-		"✓ built demo in",
+		"verifying artifact...",
 		"Next steps:",
 		"op test demo",
 		"op install demo",
@@ -1121,6 +1206,9 @@ func TestBuildCommandEmitsProgressAndSuggestions(t *testing.T) {
 		if !strings.Contains(stderr, expected) {
 			t.Fatalf("stderr missing %q: %q", expected, stderr)
 		}
+	}
+	if strings.Contains(stderr, "✓ built demo in") {
+		t.Fatalf("stderr should keep the final progress line instead of printing a summary: %q", stderr)
 	}
 	if strings.Contains(stderr, "op test demo  run tests") {
 		t.Fatalf("stderr still renders command and description on one line: %q", stderr)
@@ -1377,6 +1465,56 @@ func TestBuildCommandDryRunAcceptsNoSign(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "skip signing (--no-sign): app/MyApp.app") {
 		t.Fatalf("stdout missing no-sign note:\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+}
+
+func TestBuildCommandCleanRemovesStaleOutputsBeforeBuild(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	dir := filepath.Join(root, "demo")
+	writeRunServiceFixture(t, dir, "demo")
+
+	staleMarker := filepath.Join(dir, ".op", "stale.txt")
+	if err := os.MkdirAll(filepath.Dir(staleMarker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleMarker, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		code := Run([]string{"build", "--clean", "demo"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("build --clean returned %d, want 0", code)
+		}
+	})
+
+	if strings.Contains(stdout, "Operation: clean") {
+		t.Fatalf("build --clean should report the build result, not a clean report:\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+	if _, err := os.Stat(staleMarker); !os.IsNotExist(err) {
+		t.Fatalf("stale marker still exists after build --clean: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".op", "build", "demo.holon", "bin", runtime.GOOS+"_"+runtime.GOARCH, "demo")); err != nil {
+		t.Fatalf("binary missing after build --clean: %v", err)
+	}
+}
+
+func TestBuildCommandCleanRejectsDryRun(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		code := Run([]string{"build", "--clean", "--dry-run", "demo"}, "0.1.0-test")
+		if code != 1 {
+			t.Fatalf("build --clean --dry-run returned %d, want 1", code)
+		}
+	})
+
+	if !strings.Contains(stderr, "--clean cannot be combined with --dry-run") {
+		t.Fatalf("stderr missing clean/dry-run conflict: %q", stderr)
 	}
 }
 
@@ -1891,6 +2029,60 @@ func TestRunCommandSkipsBuildWhenArtifactAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestRunCommandCleanRebuildsStaleArtifact(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+
+	dir := filepath.Join(root, "demo")
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/demo\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "demo", "main.go"), []byte(runEchoMainSource("stale")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCLIManifestFile(filepath.Join(dir, identity.ManifestFileName), "schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nrequires:\n  commands: [go]\n  files: [go.mod]\nartifacts:\n  binary: demo\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	binaryPath := filepath.Join(dir, ".op", "build", "demo.holon", "bin", runtime.GOOS+"_"+runtime.GOARCH, "demo")
+	buildRunBinary(t, dir, binaryPath, "./cmd/demo")
+
+	staleMarker := filepath.Join(dir, ".op", "stale.txt")
+	if err := os.WriteFile(staleMarker, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cmd", "demo", "main.go"), []byte(runEchoMainSource("rebuilt")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureOutput(t, func() {
+		code := Run([]string{"run", "--clean", "demo"}, "0.1.0-test")
+		if code != 0 {
+			t.Fatalf("run --clean returned %d, want 0", code)
+		}
+	})
+
+	if !strings.Contains(stdout, "rebuilt serve --listen stdio://") {
+		t.Fatalf("run --clean output missing rebuilt binary execution: %q", stdout)
+	}
+	if strings.Contains(stdout, "stale serve --listen stdio://") {
+		t.Fatalf("run --clean unexpectedly used stale binary: %q", stdout)
+	}
+	if !strings.Contains(stderr, "go build -o") {
+		t.Fatalf("run --clean stderr missing rebuild step: %q", stderr)
+	}
+	if _, err := os.Stat(staleMarker); !os.IsNotExist(err) {
+		t.Fatalf("stale marker still exists after run --clean: %v", err)
+	}
+}
+
 func TestRunCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)
@@ -1912,6 +2104,19 @@ func TestRunCommandNoBuildFailsWhenArtifactMissing(t *testing.T) {
 
 	if !strings.Contains(stderr, "artifact missing") {
 		t.Fatalf("stderr missing artifact error: %q", stderr)
+	}
+}
+
+func TestRunCommandCleanRejectsNoBuild(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		code := Run([]string{"run", "--clean", "--no-build", "demo"}, "0.1.0-test")
+		if code != 1 {
+			t.Fatalf("run --clean --no-build returned %d, want 1", code)
+		}
+	})
+
+	if !strings.Contains(stderr, "--clean cannot be combined with --no-build") {
+		t.Fatalf("stderr missing clean/no-build conflict: %q", stderr)
 	}
 }
 
@@ -1986,6 +2191,80 @@ func TestHolonSlugDispatchUsesAutoConnectChain(t *testing.T) {
 	}
 }
 
+func TestHolonSlugDispatchAutoBuildsCompiledSourceHolon(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+	if _, err := exec.LookPath("cmake"); err != nil {
+		t.Skip("cmake command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+	seedCompiledAutoBuildEchoHolon(t, root)
+
+	exitCode := 0
+	stdout, stderr := captureOutput(t, func() {
+		exitCode = Run([]string{"echo-server", "Ping", `{"message":"Alice"}`}, "0.1.0-test")
+	})
+	if exitCode != 0 {
+		t.Fatalf("echo-server Ping returned %d, want 0\nstdout=%q\nstderr=%q", exitCode, stdout, stderr)
+	}
+
+	if !strings.Contains(stdout, `"message": "Alice"`) {
+		t.Fatalf("stdout missing echoed payload: %q", stdout)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("auto-build should stay silent on non-TTY success, stderr=%q", stderr)
+	}
+
+	binaryPath := filepath.Join(root, "holons", "echo-server", ".op", "build", "echo-server.holon", "bin", runtime.GOOS+"_"+runtime.GOARCH, "echo-server")
+	if _, err := os.Stat(binaryPath); err != nil {
+		t.Fatalf("auto-build did not produce binary %q: %v", binaryPath, err)
+	}
+}
+
+func TestHolonSlugDispatchCleanRemovesStaleOutputsAndAutoBuilds(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+	if _, err := exec.LookPath("cmake"); err != nil {
+		t.Skip("cmake command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+	seedCompiledAutoBuildEchoHolon(t, root)
+
+	staleMarker := filepath.Join(root, "holons", "echo-server", ".op", "stale.txt")
+	if err := os.MkdirAll(filepath.Dir(staleMarker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staleMarker, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	exitCode := 0
+	stdout, stderr := captureOutput(t, func() {
+		exitCode = Run([]string{"echo-server", "--clean", "Ping", `{"message":"Alice"}`}, "0.1.0-test")
+	})
+	if exitCode != 0 {
+		t.Fatalf("echo-server --clean Ping returned %d, want 0\nstdout=%q\nstderr=%q", exitCode, stdout, stderr)
+	}
+
+	if !strings.Contains(stdout, `"message": "Alice"`) {
+		t.Fatalf("stdout missing echoed payload: %q", stdout)
+	}
+	if _, err := os.Stat(staleMarker); !os.IsNotExist(err) {
+		t.Fatalf("stale marker still exists after slug dispatch --clean: %v", err)
+	}
+
+	binaryPath := filepath.Join(root, "holons", "echo-server", ".op", "build", "echo-server.holon", "bin", runtime.GOOS+"_"+runtime.GOARCH, "echo-server")
+	if _, err := os.Stat(binaryPath); err != nil {
+		t.Fatalf("slug dispatch --clean did not rebuild binary %q: %v", binaryPath, err)
+	}
+}
+
 func TestGRPCSlugDispatchUsesAutoConnectChain(t *testing.T) {
 	root := t.TempDir()
 	chdirForTest(t, root)
@@ -2000,6 +2279,46 @@ func TestGRPCSlugDispatchUsesAutoConnectChain(t *testing.T) {
 
 	if !strings.Contains(stdout, `"message": "Alice"`) {
 		t.Fatalf("stdout missing echoed payload: %q", stdout)
+	}
+}
+
+func TestHolonSlugDispatchCleanRejectsNoBuild(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		code := Run([]string{"echo-server", "--clean", "Ping", "--no-build", `{"message":"Alice"}`}, "0.1.0-test")
+		if code != 1 {
+			t.Fatalf("echo-server --clean Ping --no-build returned %d, want 1", code)
+		}
+	})
+
+	if !strings.Contains(stderr, "--clean cannot be combined with --no-build") {
+		t.Fatalf("stderr missing clean/no-build conflict: %q", stderr)
+	}
+}
+
+func TestGRPCSlugDispatchNoBuildFailsForMissingCompiledBinary(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go command not available")
+	}
+	if _, err := exec.LookPath("cmake"); err != nil {
+		t.Skip("cmake command not available")
+	}
+
+	root := t.TempDir()
+	chdirForTest(t, root)
+	seedCompiledAutoBuildEchoHolon(t, root)
+
+	stderr := captureStderr(t, func() {
+		code := Run([]string{"grpc://echo-server", "Ping", "--no-build", `{"message":"Alice"}`}, "0.1.0-test")
+		if code != 1 {
+			t.Fatalf("grpc://echo-server returned %d, want 1", code)
+		}
+	})
+
+	if !strings.Contains(stderr, "built binary not found") {
+		t.Fatalf("stderr missing binary-not-found error: %q", stderr)
+	}
+	if strings.Contains(stderr, "building echo-server") {
+		t.Fatalf("stderr should not include auto-build progress when --no-build is set: %q", stderr)
 	}
 }
 
@@ -2397,6 +2716,98 @@ func writeCLISharedManifestProto(t *testing.T, root string) {
 	}
 	if err := os.WriteFile(filepath.Join(targetDir, "manifest.proto"), data, 0o644); err != nil {
 		t.Fatalf("write manifest.proto: %v", err)
+	}
+}
+
+func seedCompiledAutoBuildEchoHolon(t *testing.T, root string) {
+	t.Helper()
+
+	dir := filepath.Join(root, "holons", "echo-server")
+	copyDir(t, cliTestSupportDir(t, "echoholon"), dir)
+	if err := os.Remove(filepath.Join(dir, "holon.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".op", "build")); err != nil {
+		t.Fatal(err)
+	}
+
+	writeCLISharedManifestProto(t, root)
+
+	repoRoot := cliRepoRoot(t)
+	graceOpRoot := filepath.Join(repoRoot, "holons", "grace-op")
+	goHolonsRoot := filepath.Join(repoRoot, "sdk", "go-holons")
+
+	goMod := fmt.Sprintf(`module github.com/organic-programming/grace-op/auto-build-fixtures/echo-server
+
+go 1.25.1
+
+require (
+	github.com/organic-programming/go-holons v0.0.0
+	github.com/organic-programming/grace-op v0.0.0
+	google.golang.org/grpc v1.78.0
+)
+
+replace github.com/organic-programming/grace-op => %s
+replace github.com/organic-programming/go-holons => %s
+`, filepath.ToSlash(graceOpRoot), filepath.ToSlash(goHolonsRoot))
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmakeLists := `cmake_minimum_required(VERSION 3.20)
+project(EchoServer NONE)
+
+set(BINARY_PATH "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/echo-server")
+
+add_custom_command(
+  OUTPUT "${BINARY_PATH}"
+  COMMAND go build -mod=mod -o "${BINARY_PATH}" .
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  VERBATIM
+)
+
+add_custom_target(echo_server ALL DEPENDS "${BINARY_PATH}")
+`
+	if err := os.WriteFile(filepath.Join(dir, "CMakeLists.txt"), []byte(cmakeLists), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proto := `syntax = "proto3";
+
+package echofixture.v1;
+
+import "holons/v1/manifest.proto";
+
+option (holons.v1.manifest) = {
+  identity: {
+    schema: "holon/v1"
+    uuid: "echo-server-autobuild-fixture"
+    given_name: "Echo"
+    family_name: "Server"
+    motto: "Compiled auto-build fixture."
+    composer: "test"
+    status: "draft"
+    born: "2026-03-24"
+  }
+  kind: "native"
+  lang: "go"
+  build: {
+    runner: "cmake"
+  }
+  requires: {
+    commands: ["cmake", "go"]
+    files: ["go.mod", "CMakeLists.txt"]
+  }
+  artifacts: {
+    binary: "echo-server"
+  }
+};
+`
+	if err := os.WriteFile(filepath.Join(dir, "v1", "holon.proto"), []byte(proto), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

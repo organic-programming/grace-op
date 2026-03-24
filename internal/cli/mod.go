@@ -138,6 +138,7 @@ func cmdModTidy(format Format, globalQuiet bool, args []string) int {
 	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	result, err := opmod.Tidy(".", opmod.Options{Progress: printer})
 	if err != nil {
 		printer.Done("mod tidy failed", err)
@@ -171,6 +172,7 @@ func cmdModPull(format Format, globalQuiet bool, args []string) int {
 	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	result, err := opmod.Pull(".", opmod.Options{Progress: printer})
 	if err != nil {
 		printer.Done("mod pull failed", err)
@@ -208,6 +210,7 @@ func cmdModUpdate(format Format, globalQuiet bool, args []string) int {
 	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	result, err := opmod.Update(".", target, opmod.Options{Progress: printer})
 	if err != nil {
 		printer.Done("mod update failed", err)

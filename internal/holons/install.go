@@ -84,8 +84,7 @@ func Install(ref string, opts InstallOptions) (InstallReport, error) {
 				return report, fmt.Errorf("remove stale artifact %s: %w", report.Artifact, err)
 			}
 		}
-		reporter.Step("building...")
-		_, buildErr := ExecuteLifecycle(OperationBuild, ref, BuildOptions{Progress: progress.Silence()})
+		_, buildErr := ExecuteLifecycle(OperationBuild, ref, BuildOptions{Progress: reporter})
 		if buildErr != nil {
 			report.Notes = append(report.Notes, "build failed before install")
 			return report, buildErr

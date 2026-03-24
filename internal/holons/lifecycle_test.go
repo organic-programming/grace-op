@@ -352,6 +352,90 @@ func TestExecuteLifecycleBuildRejectsCrossTargetGoModule(t *testing.T) {
 	}
 }
 
+func TestExecuteLifecycleCleanRecursesCompositeMembers(t *testing.T) {
+	root := t.TempDir()
+	chdirForHolonTest(t, root)
+
+	target := runtime.GOOS
+	if target == "darwin" {
+		target = "macos"
+	}
+
+	leafDir := filepath.Join(root, "leaf")
+	siblingDir := filepath.Join(root, "sibling")
+	nestedDir := filepath.Join(root, "nested")
+	appDir := filepath.Join(nestedDir, "app")
+	rootAppDir := filepath.Join(root, "app")
+	for _, dir := range []string{leafDir, siblingDir, appDir, rootAppDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := testutil.WriteManifestFile(filepath.Join(leafDir, identity.ManifestFileName), "schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nartifacts:\n  binary: leaf\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteManifestFile(filepath.Join(siblingDir, identity.ManifestFileName), "schema: holon/v0\nkind: native\nbuild:\n  runner: go-module\nartifacts:\n  binary: sibling\n"); err != nil {
+		t.Fatal(err)
+	}
+	nestedManifest := fmt.Sprintf("schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  defaults:\n    target: %s\n    mode: debug\n  members:\n    - id: leaf\n      path: ../leaf\n      type: holon\n    - id: app\n      path: app\n      type: component\n  targets:\n    %s:\n      steps:\n        - build_member: leaf\nartifacts:\n  primary: app/app\n", target, target)
+	if err := testutil.WriteManifestFile(filepath.Join(nestedDir, identity.ManifestFileName), nestedManifest); err != nil {
+		t.Fatal(err)
+	}
+	rootManifest := fmt.Sprintf("schema: holon/v0\nkind: composite\nbuild:\n  runner: recipe\n  defaults:\n    target: %s\n    mode: debug\n  members:\n    - id: nested\n      path: nested\n      type: holon\n    - id: sibling\n      path: sibling\n      type: holon\n    - id: app\n      path: app\n      type: component\n  targets:\n    %s:\n      steps:\n        - build_member: nested\n        - build_member: sibling\nartifacts:\n  primary: app/app\n", target, target)
+	if err := testutil.WriteManifestFile(filepath.Join(root, identity.ManifestFileName), rootManifest); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, marker := range []string{
+		filepath.Join(root, ".op", "stale.txt"),
+		filepath.Join(nestedDir, ".op", "stale.txt"),
+		filepath.Join(leafDir, ".op", "stale.txt"),
+		filepath.Join(siblingDir, ".op", "stale.txt"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := ExecuteLifecycle(OperationClean, root)
+	if err != nil {
+		t.Fatalf("clean failed: %v", err)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(root, ".op"),
+		filepath.Join(nestedDir, ".op"),
+		filepath.Join(leafDir, ".op"),
+		filepath.Join(siblingDir, ".op"),
+	} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("%s still exists after recursive clean: %v", dir, err)
+		}
+	}
+
+	if len(report.Children) != 2 {
+		t.Fatalf("root clean children = %d, want 2", len(report.Children))
+	}
+
+	var nestedReport *Report
+	for i := range report.Children {
+		if report.Children[i].Holon == "nested" {
+			nestedReport = &report.Children[i]
+			break
+		}
+	}
+	if nestedReport == nil {
+		t.Fatalf("nested child report missing: %+v", report.Children)
+	}
+	if len(nestedReport.Children) != 1 || nestedReport.Children[0].Holon != "leaf" {
+		t.Fatalf("nested child reports = %+v, want one leaf child", nestedReport.Children)
+	}
+}
+
 func writeProtoGoHolonFixture(t *testing.T, root, name string) string {
 	t.Helper()
 

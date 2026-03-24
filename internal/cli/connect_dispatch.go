@@ -2,12 +2,18 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	sdkconnect "github.com/organic-programming/go-holons/pkg/connect"
 	internalgrpc "github.com/organic-programming/grace-op/internal/grpcclient"
+	"github.com/organic-programming/grace-op/internal/holons"
+	"github.com/organic-programming/grace-op/internal/identity"
+	"github.com/organic-programming/grace-op/internal/progress"
+	"google.golang.org/grpc"
 )
 
 const connectDispatchTimeout = 10 * time.Second
@@ -28,8 +34,14 @@ func runConnectedRPC(
 	method string,
 	inputJSON string,
 	opts sdkconnect.ConnectOptions,
+	noBuild bool,
 ) int {
 	conn, err := sdkconnect.ConnectWithOpts(holonName, opts)
+	if err != nil {
+		if !noBuild && errors.Is(err, sdkconnect.ErrBinaryNotFound) {
+			conn, err = autoBuildAndConnect(holonName, opts)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", errPrefix, err)
 		return 1
@@ -49,18 +61,66 @@ func runConnectedRPC(
 	return 0
 }
 
-func cmdGRPCConnected(format Format, uri string, holonName string, args []string, transport string) int {
+func parseConnectedRPCArgs(args []string) (method string, inputJSON string, noBuild bool, err error) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "op grpc: method required")
-		fmt.Fprintf(os.Stderr, "usage: op %s <method>\n", uri)
+		return "", "", false, fmt.Errorf("method required")
+	}
+
+	method = args[0]
+	remaining := args[1:]
+	inputJSON = "{}"
+
+	if len(remaining) > 0 && remaining[0] == "--no-build" {
+		noBuild = true
+		remaining = remaining[1:]
+	}
+
+	if len(remaining) > 0 {
+		inputJSON = remaining[0]
+	}
+
+	for _, arg := range remaining[1:] {
+		if strings.TrimSpace(arg) == "--no-build" {
+			return "", "", false, fmt.Errorf("--no-build must come immediately after the method")
+		}
+	}
+
+	return method, inputJSON, noBuild, nil
+}
+
+func autoBuildAndConnect(holonName string, opts sdkconnect.ConnectOptions) (*grpc.ClientConn, error) {
+	target, err := holons.ResolveTarget(holonName)
+	if err != nil {
+		return nil, err
+	}
+	if target.ManifestErr != nil {
+		return nil, target.ManifestErr
+	}
+	if target.Manifest == nil {
+		return nil, fmt.Errorf("no %s found in %s", identity.ProtoManifestFileName, target.RelativePath)
+	}
+
+	pw := progress.New(os.Stderr)
+	if !pw.IsTTY() {
+		pw = progress.Silence()
+	}
+	defer pw.Close()
+
+	if _, err := holons.ExecuteLifecycle(holons.OperationBuild, target.Dir, holons.BuildOptions{Progress: pw}); err != nil {
+		pw.Keep()
+		return nil, err
+	}
+	pw.Clear()
+
+	return sdkconnect.ConnectWithOpts(holonName, opts)
+}
+
+func cmdGRPCConnected(format Format, uri string, holonName string, args []string, transport string) int {
+	method, inputJSON, noBuild, err := parseConnectedRPCArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "op grpc: %v\n", err)
+		fmt.Fprintf(os.Stderr, "usage: op %s <method> [--no-build] [json]\n", uri)
 		return 1
 	}
-
-	method := args[0]
-	inputJSON := "{}"
-	if len(args) > 1 {
-		inputJSON = args[1]
-	}
-
-	return runConnectedRPC(format, "op grpc", holonName, method, inputJSON, oneShotConnectOptions(transport))
+	return runConnectedRPC(format, "op grpc", holonName, method, inputJSON, oneShotConnectOptions(transport), noBuild)
 }

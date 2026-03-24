@@ -16,6 +16,7 @@ func cmdLifecycle(format Format, globalQuiet bool, operation holons.Operation, a
 
 	// Parse build-specific flags before the positional argument.
 	var opts holons.BuildOptions
+	cleanFirst := false
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -27,6 +28,8 @@ func cmdLifecycle(format Format, globalQuiet bool, operation holons.Operation, a
 			i++
 		case args[i] == "--dry-run":
 			opts.DryRun = true
+		case args[i] == "--clean" && operation == holons.OperationBuild:
+			cleanFirst = true
 		case args[i] == "--no-sign" && operation == holons.OperationBuild:
 			opts.NoSign = true
 		case strings.HasPrefix(args[i], "--"):
@@ -46,18 +49,29 @@ func cmdLifecycle(format Format, globalQuiet bool, operation holons.Operation, a
 	if len(positional) == 1 {
 		target = positional[0]
 	}
+	if cleanFirst && opts.DryRun {
+		fmt.Fprintln(os.Stderr, "op build: --clean cannot be combined with --dry-run")
+		return 1
+	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	if operation == holons.OperationBuild || operation == holons.OperationTest || operation == holons.OperationClean {
 		if !opts.DryRun {
 			opts.Progress = printer
+		}
+	}
+	if operation == holons.OperationBuild && cleanFirst {
+		if _, err := runCleanWithProgress(printer, target); err != nil {
+			fmt.Fprintf(os.Stderr, "op build: %v\n", err)
+			return 1
 		}
 	}
 
 	report, err := holons.ExecuteLifecycle(operation, target, opts)
 	if err != nil {
 		if operation == holons.OperationBuild || operation == holons.OperationTest || operation == holons.OperationClean {
-			printer.Done(string(operation)+" failed", err)
+			printer.Keep()
 		}
 		if format == FormatJSON {
 			type errorReport struct {
@@ -85,7 +99,7 @@ func cmdLifecycle(format Format, globalQuiet bool, operation holons.Operation, a
 	} else {
 		switch operation {
 		case holons.OperationBuild:
-			printer.Done(fmt.Sprintf("built %s in %s", report.Holon, humanElapsed(printer)), nil)
+			printer.KeepAs(fmt.Sprintf("built %s… ✓", report.Holon))
 		case holons.OperationTest:
 			printer.Done(fmt.Sprintf("tests passed for %s in %s", report.Holon, humanElapsed(printer)), nil)
 		case holons.OperationClean:

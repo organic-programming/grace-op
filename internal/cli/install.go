@@ -19,6 +19,7 @@ func cmdInstall(format Format, globalQuiet bool, args []string) int {
 		positional []string
 	)
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	opts.Progress = printer
 
 	for _, arg := range args {
@@ -48,10 +49,10 @@ func cmdInstall(format Format, globalQuiet bool, args []string) int {
 
 	report, err := holons.Install(target, opts)
 	if err != nil {
-		printer.Done("install failed", err)
+		printer.Keep()
 		return printInstallResult(format, report, err, "install")
 	}
-	printer.Done(fmt.Sprintf("installed %s in %s", report.Binary, humanElapsed(printer)), nil)
+	printer.Keep()
 	exitCode := printInstallResult(format, report, nil, "install")
 	if manifest, holon := manifestForSuggestions(target); manifest != nil {
 		emitSuggestions(os.Stderr, format, quiet, suggest.Context{
@@ -75,6 +76,7 @@ func cmdUninstall(format Format, globalQuiet bool, args []string) int {
 	}
 
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 	report, err := holons.UninstallWithOptions(args[0], holons.InstallOptions{Progress: printer})
 	if err != nil {
 		printer.Done("uninstall failed", err)

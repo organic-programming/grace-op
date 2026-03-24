@@ -82,7 +82,9 @@ func Run(args []string, version string) int {
 		return cmdCompletion(rest)
 	case "__complete":
 		return cmdComplete(rest)
-	case "help", "--help", "-h":
+	case "help":
+		return cmdHelp(rest)
+	case "--help", "-h":
 		PrintUsage()
 		return 0
 	case "new", "list", "show":
@@ -98,7 +100,7 @@ func Run(args []string, version string) int {
 			strings.HasPrefix(cmd, "grpc+wss://") {
 			return cmdGRPC(format, cmd, rest)
 		}
-		return cmdHolon(format, cmd, rest)
+		return cmdHolon(format, quiet, cmd, rest)
 	}
 }
 
@@ -112,6 +114,9 @@ Global flags (must come before <holon> or URI):
 
 Holon dispatch (transport chain):
   op <holon> <command> [args]            dispatch via the SDK auto-connect chain
+  op <holon> --clean <method> [--no-build] [json]
+  op <holon> <method> [--no-build] [json]
+                                         call a holon RPC; auto-build compiled slugs if needed
 
 Direct gRPC URI dispatch:
   op grpc://<slug|host:port> <method>    gRPC auto-connect for slugs, direct TCP for host:port
@@ -145,6 +150,7 @@ OP commands:
   op env [--init] [--shell]              print resolved OPPATH / OPBIN / ROOT
 
 Build flags:
+  --clean                                      clean before building (cannot be combined with --dry-run)
   --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
   --mode <debug|release|profile>               build mode (default: debug)
   --dry-run                                    print resolved plan, do not execute
@@ -155,15 +161,68 @@ Install flags:
   --link-applications                          symlink installed .app bundles into /Applications (macOS only)
 
 Run flags:
+  --clean                                      clean before building and running (cannot be combined with --no-build)
   --listen <URI>                               listen address for service holons (default: stdio://)
   --no-build                                   fail if the artifact is missing instead of building
   --target <...>                               pass build target through if a build is needed
   --mode <debug|release|profile>               pass build mode through if a build is needed
 
+Dispatch flag:
+  --clean                                      clean the slug target before auto-building and calling
+  --no-build                                   fail if a slug-based RPC target is missing its built binary
+
   op discover                            list available holons
   op serve [--listen tcp://:9090]        start OP's own gRPC server
   op version                             show op version
-  op help                                this message
+  op help [command]                      this message or topic help (build, run)
+`)
+}
+
+func cmdHelp(args []string) int {
+	if len(args) == 0 {
+		PrintUsage()
+		return 0
+	}
+
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "build":
+		printBuildHelp()
+		return 0
+	case "run":
+		printRunHelp()
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "op help: unknown topic %q\n", args[0])
+		return 1
+	}
+}
+
+func printBuildHelp() {
+	fmt.Print(`op build [<holon-or-path>] [flags]
+
+Build a holon artifact via its runner.
+
+Flags:
+  --clean                                      clean before building (cannot be combined with --dry-run)
+  --target <macos|linux|windows|ios|ios-simulator|tvos|tvos-simulator|watchos|watchos-simulator|visionos|visionos-simulator|android|all>   platform target (default: current OS)
+  --mode <debug|release|profile>               build mode (default: debug)
+  --dry-run                                    print resolved plan, do not execute
+  --no-sign                                    skip automatic ad-hoc signing for bundle artifacts
+`)
+}
+
+func printRunHelp() {
+	fmt.Print(`op run <holon> [flags]
+op run <holon>:<port>
+
+Build a holon if needed, then launch it in the foreground.
+
+Flags:
+  --clean                                      clean before building and running (cannot be combined with --no-build)
+  --listen <URI>                               listen address for service holons (default: stdio://)
+  --no-build                                   fail if the artifact is missing instead of building
+  --target <...>                               pass build target through if a build is needed
+  --mode <debug|release|profile>               pass build mode through if a build is needed
 `)
 }
 
@@ -306,6 +365,7 @@ func cmdServe(args []string) int {
 type runOptions struct {
 	ListenURI      string
 	ListenExplicit bool
+	Clean          bool
 	NoBuild        bool
 	Target         string
 	Mode           string
@@ -322,6 +382,7 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		return 1
 	}
 	printer := commandProgress(format, quiet)
+	defer printer.Close()
 
 	printer.Step("resolving " + holonName + "...")
 
@@ -330,27 +391,29 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		resolvedTarget = target
 	}
 
-	if binary := resolveInstalledBinary(holonName); binary != "" {
-		printer.Step("launching " + holonName + "...")
-		cmd, err := commandForInstalledArtifact(binary, resolvedTarget, opts.ListenURI)
-		if err != nil {
-			printer.Done("run failed", err)
-			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
-			return 1
-		}
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := runForeground(cmd); err != nil {
-			if code, ok := commandExitCode(err); ok {
-				return code
+	if !opts.Clean {
+		if binary := resolveInstalledBinary(holonName); binary != "" {
+			printer.Step("launching " + holonName + "...")
+			cmd, err := commandForInstalledArtifact(binary, resolvedTarget, opts.ListenURI)
+			if err != nil {
+				printer.Done("run failed", err)
+				fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+				return 1
 			}
-			printer.Done("run failed", err)
-			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
-			return 1
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := runForeground(cmd); err != nil {
+				if code, ok := commandExitCode(err); ok {
+					return code
+				}
+				printer.Done("run failed", err)
+				fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+				return 1
+			}
+			printer.Done(fmt.Sprintf("%s exited in %s", holonName, humanElapsed(printer)), nil)
+			return 0
 		}
-		printer.Done(fmt.Sprintf("%s exited in %s", holonName, humanElapsed(printer)), nil)
-		return 0
 	}
 
 	target, err := holons.ResolveTarget(holonName)
@@ -369,6 +432,13 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		printer.Done("run failed", err)
 		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
+	}
+
+	if opts.Clean {
+		if _, err := runCleanWithProgress(printer, target.Dir); err != nil {
+			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+			return 1
+		}
 	}
 
 	ctx, err := holons.ResolveBuildContext(target.Manifest, holons.BuildOptions{
@@ -402,20 +472,27 @@ func cmdRun(format Format, globalQuiet bool, args []string) int {
 		fmt.Fprintf(os.Stderr, "op run: %v\n", err)
 		return 1
 	}
-	if _, err := os.Stat(artifactPath); err != nil {
-		if !os.IsNotExist(err) {
-			printer.Done("run failed", err)
-			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
-			return 1
+
+	needBuild := opts.Clean
+	if !needBuild {
+		if _, err := os.Stat(artifactPath); err != nil {
+			if !os.IsNotExist(err) {
+				printer.Done("run failed", err)
+				fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+				return 1
+			}
+			if opts.NoBuild {
+				err := fmt.Errorf("artifact missing: %s", artifactPath)
+				printer.Done("run failed", err)
+				fmt.Fprintf(os.Stderr, "op run: %v\n", err)
+				return 1
+			}
+			needBuild = true
 		}
-		if opts.NoBuild {
-			err := fmt.Errorf("artifact missing: %s", artifactPath)
-			printer.Done("run failed", err)
-			fmt.Fprintf(os.Stderr, "op run: %v\n", err)
-			return 1
-		}
-		printer.Step("building " + holonName + "...")
-		if _, err := holons.ExecuteLifecycle(holons.OperationBuild, holonName, holons.BuildOptions{
+	}
+
+	if needBuild {
+		if _, err := holons.ExecuteLifecycle(holons.OperationBuild, target.Dir, holons.BuildOptions{
 			Target:   opts.Target,
 			Mode:     opts.Mode,
 			Progress: printer,
@@ -579,18 +656,30 @@ func discoverInPath() []string {
 // --- Namespace dispatch ---
 
 // cmdHolon runs `op <holon> <command> [args...]` through the transport chain.
-func cmdHolon(format Format, holon string, args []string) int {
+func cmdHolon(format Format, quiet bool, holon string, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "op: missing command for holon %q\n", holon)
 		return 1
 	}
 
-	method, inputJSON, err := mapHolonCommandToRPC(args)
+	method, inputJSON, cleanFirst, noBuild, err := mapHolonCommandToRPC(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "op: %v\n", err)
 		return 1
 	}
-	return runConnectedRPC(format, "op", holon, method, inputJSON, oneShotConnectOptions(sdkconnect.TransportAuto))
+	if cleanFirst && noBuild {
+		fmt.Fprintln(os.Stderr, "op: --clean cannot be combined with --no-build")
+		return 1
+	}
+	if cleanFirst {
+		printer := commandProgress(format, quiet)
+		defer printer.Close()
+		if _, err := runCleanWithProgress(printer, holon); err != nil {
+			fmt.Fprintf(os.Stderr, "op: %v\n", err)
+			return 1
+		}
+	}
+	return runConnectedRPC(format, "op", holon, method, inputJSON, oneShotConnectOptions(sdkconnect.TransportAuto), noBuild)
 }
 
 func isHostPortTarget(target string) bool {
@@ -598,13 +687,38 @@ func isHostPortTarget(target string) bool {
 	return err == nil
 }
 
-func mapHolonCommandToRPC(args []string) (method string, inputJSON string, err error) {
+func mapHolonCommandToRPC(args []string) (method string, inputJSON string, cleanFirst bool, noBuild bool, err error) {
+	if len(args) == 0 {
+		return "", "", false, false, fmt.Errorf("method required")
+	}
+	if args[0] == "--clean" {
+		cleanFirst = true
+		args = args[1:]
+		if len(args) == 0 {
+			return "", "", false, false, fmt.Errorf("method required")
+		}
+	}
+
 	command := strings.TrimSpace(args[0])
 	rest := args[1:]
 
 	method = mapCommandNameToMethod(command)
+	for _, arg := range rest {
+		if strings.TrimSpace(arg) == "--clean" {
+			return "", "", false, false, fmt.Errorf("--clean must come immediately before the method")
+		}
+	}
+	if len(rest) > 0 && rest[0] == "--no-build" {
+		noBuild = true
+		rest = rest[1:]
+	}
 	if len(rest) > 0 && looksLikeJSON(rest[0]) {
-		return method, rest[0], nil
+		for _, arg := range rest[1:] {
+			if strings.TrimSpace(arg) == "--no-build" {
+				return "", "", false, false, fmt.Errorf("--no-build must come immediately after the method")
+			}
+		}
+		return method, rest[0], cleanFirst, noBuild, nil
 	}
 
 	switch strings.ToLower(command) {
@@ -612,22 +726,25 @@ func mapHolonCommandToRPC(args []string) (method string, inputJSON string, err e
 		if len(rest) > 0 {
 			payload, err := json.Marshal(map[string]string{"rootDir": rest[0]})
 			if err != nil {
-				return "", "", err
+				return "", "", false, false, err
 			}
-			return method, string(payload), nil
+			return method, string(payload), cleanFirst, noBuild, nil
 		}
-		return method, "{}", nil
+		return method, "{}", cleanFirst, noBuild, nil
 	case "show":
 		if len(rest) < 1 {
-			return "", "", fmt.Errorf("show requires <uuid>")
+			return "", "", false, false, fmt.Errorf("show requires <uuid>")
 		}
 		payload, err := json.Marshal(map[string]string{"uuid": rest[0]})
 		if err != nil {
-			return "", "", err
+			return "", "", false, false, err
 		}
-		return method, string(payload), nil
+		return method, string(payload), cleanFirst, noBuild, nil
 	default:
-		return method, "{}", nil
+		if len(rest) > 0 && rest[0] == "--no-build" {
+			return "", "", false, false, fmt.Errorf("--no-build must come immediately after the method")
+		}
+		return method, "{}", cleanFirst, noBuild, nil
 	}
 }
 
@@ -726,6 +843,8 @@ func parseRunArgs(args []string) (string, runOptions, error) {
 			opts.ListenURI = args[i+1]
 			opts.ListenExplicit = true
 			i++
+		case args[i] == "--clean":
+			opts.Clean = true
 		case args[i] == "--no-build":
 			opts.NoBuild = true
 		case args[i] == "--target":
@@ -752,6 +871,9 @@ func parseRunArgs(args []string) (string, runOptions, error) {
 	}
 	if len(positional) > 1 {
 		return "", opts, fmt.Errorf("accepts exactly one <holon>")
+	}
+	if opts.Clean && opts.NoBuild {
+		return "", opts, fmt.Errorf("--clean cannot be combined with --no-build")
 	}
 
 	holonName := strings.TrimSpace(positional[0])

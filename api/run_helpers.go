@@ -16,6 +16,7 @@ import (
 	opv1 "github.com/organic-programming/grace-op/gen/go/op/v1"
 	"github.com/organic-programming/grace-op/internal/holons"
 	"github.com/organic-programming/grace-op/internal/identity"
+	"github.com/organic-programming/grace-op/internal/progress"
 )
 
 type runIO struct {
@@ -23,6 +24,7 @@ type runIO struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	forwardSignal bool
+	progress      progress.Reporter
 }
 
 func Run(req *opv1.RunRequest) (*opv1.RunResponse, error) {
@@ -43,6 +45,10 @@ func runWithIO(req *opv1.RunRequest, ioCfg runIO) (*opv1.RunResponse, error) {
 	response := &opv1.RunResponse{
 		Holon:     holonName,
 		ListenUri: listenURI,
+	}
+	reporter := ioCfg.progress
+	if reporter == nil {
+		reporter = progress.Silence()
 	}
 
 	var stdout bytes.Buffer
@@ -74,12 +80,14 @@ func runWithIO(req *opv1.RunRequest, ioCfg runIO) (*opv1.RunResponse, error) {
 	}
 
 	var resolvedTarget *holons.Target
+	reporter.Step("resolving " + holonName + "...")
 	if target, resolveErr := holons.ResolveTarget(holonName); resolveErr == nil && target != nil && target.ManifestErr == nil && target.Manifest != nil {
 		resolvedTarget = target
 	}
 
 	if binary := holons.ResolveInstalledBinary(holonName); binary != "" {
 		response.ResolvedTarget = binary
+		reporter.Step("launching " + holonName + "...")
 		cmd, err := commandForInstalledArtifact(binary, resolvedTarget, listenURI)
 		if err != nil {
 			return response, err
@@ -129,8 +137,9 @@ func runWithIO(req *opv1.RunRequest, ioCfg runIO) (*opv1.RunResponse, error) {
 			return response, fmt.Errorf("artifact missing: %s", artifactPath)
 		}
 		if _, err := holons.ExecuteLifecycle(holons.OperationBuild, holonName, holons.BuildOptions{
-			Target: req.GetTarget(),
-			Mode:   req.GetMode(),
+			Target:   req.GetTarget(),
+			Mode:     req.GetMode(),
+			Progress: reporter,
 		}); err != nil {
 			return response, err
 		}
@@ -140,6 +149,7 @@ func runWithIO(req *opv1.RunRequest, ioCfg runIO) (*opv1.RunResponse, error) {
 	if err != nil {
 		return response, err
 	}
+	reporter.Step("launching " + holonName + "...")
 	if err := runCommand(cmd); err != nil {
 		return response, err
 	}

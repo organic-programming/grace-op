@@ -581,7 +581,7 @@ func (cargoRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Repo
 	return nil
 }
 
-func (cargoRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (cargoRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}
@@ -715,7 +715,7 @@ func (pythonRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Rep
 	return nil
 }
 
-func (pythonRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (pythonRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := removeNamedDirs(manifest.Dir, "__pycache__"); err != nil {
 		return err
 	}
@@ -794,7 +794,7 @@ func (dartRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Repor
 	return nil
 }
 
-func (dartRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (dartRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := removeSelectedPaths(manifest.Dir, "build", ".dart_tool"); err != nil {
 		return err
 	}
@@ -897,7 +897,7 @@ func (rubyRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Repor
 	return nil
 }
 
-func (rubyRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (rubyRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := removeSelectedPaths(manifest.Dir, "log", "tmp", ".bundle", filepath.Join("vendor", "bundle")); err != nil {
 		return err
 	}
@@ -1005,7 +1005,7 @@ func (swiftPackageRunner) test(manifest *LoadedManifest, ctx BuildContext, repor
 	return fmt.Errorf("swift-package test is only supported for Package.swift projects")
 }
 
-func (swiftPackageRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (swiftPackageRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if hasSwiftPackage(manifest) {
 		args := []string{"swift", "package", "clean"}
 		report.Commands = append(report.Commands, commandString(args))
@@ -1084,7 +1084,7 @@ func (flutterRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Re
 	return nil
 }
 
-func (flutterRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (flutterRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	args := []string{"flutter", "clean"}
 	report.Commands = append(report.Commands, commandString(args))
 	if _, err := exec.LookPath("flutter"); err == nil {
@@ -1196,7 +1196,7 @@ func (npmRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Report
 	return nil
 }
 
-func (npmRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (npmRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	for _, dir := range []string{"node_modules", "dist", "build"} {
 		if err := os.RemoveAll(filepath.Join(manifest.Dir, dir)); err != nil {
 			return err
@@ -1316,7 +1316,7 @@ func (gradleRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Rep
 	return nil
 }
 
-func (gradleRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (gradleRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	invoker, err := gradleInvoker(manifest)
 	if err == nil {
 		args := append(invoker, "clean")
@@ -1410,7 +1410,7 @@ func (dotnetRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Rep
 	return nil
 }
 
-func (dotnetRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (dotnetRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	args := []string{"dotnet", "clean"}
 	report.Commands = append(report.Commands, commandString(args))
 	if _, err := exec.LookPath("dotnet"); err == nil {
@@ -1525,7 +1525,7 @@ func (qtCMakeRunner) test(manifest *LoadedManifest, ctx BuildContext, report *Re
 	return nil
 }
 
-func (qtCMakeRunner) clean(manifest *LoadedManifest, report *Report) error {
+func (qtCMakeRunner) clean(manifest *LoadedManifest, _ BuildContext, report *Report) error {
 	if err := os.RemoveAll(manifest.OpRoot()); err != nil {
 		return err
 	}
