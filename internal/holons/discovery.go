@@ -1,6 +1,7 @@
 package holons
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -88,6 +89,7 @@ func discoverHolonsInRoot(root, origin string, relPath func(string, string) stri
 	candidates := make(map[string]LocalHolon)
 	orderedKeys := make([]string, 0)
 	protoFiles := make([]string, 0)
+	holonPackageDirs := make([]string, 0)
 
 	err = filepath.WalkDir(absRoot, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -95,6 +97,11 @@ func discoverHolonsInRoot(root, origin string, relPath func(string, string) stri
 		}
 
 		if d.IsDir() {
+			// Collect .holon package directories and stop descending into them.
+			if path != absRoot && isHolonPackagePath(d.Name()) {
+				holonPackageDirs = append(holonPackageDirs, path)
+				return filepath.SkipDir
+			}
 			if shouldSkipDiscoveryDir(absRoot, path, d.Name()) {
 				return filepath.SkipDir
 			}
@@ -109,6 +116,22 @@ func discoverHolonsInRoot(root, origin string, relPath func(string, string) stri
 		return nil, err
 	}
 
+	// Phase 1: .holon packages (fast path via .holon.json).
+	sort.Strings(holonPackageDirs)
+	for _, pkgDir := range holonPackageDirs {
+		entry, ok := holonFromPackageDir(pkgDir, absRoot, origin, relPath)
+		if !ok {
+			continue
+		}
+		key := strings.TrimSpace(entry.Identity.UUID)
+		if key == "" {
+			key = pkgDir
+		}
+		candidates[key] = entry
+		orderedKeys = append(orderedKeys, key)
+	}
+
+	// Phase 2: source holons (holon.proto walk).
 	sort.Strings(protoFiles)
 	for _, protoPath := range protoFiles {
 		resolved, err := identity.ResolveFromProtoFile(protoPath)
@@ -174,7 +197,52 @@ func shouldSkipDiscoveryDir(root, path, name string) bool {
 	if name == ".git" || name == ".op" || name == "node_modules" || name == "vendor" || name == "build" || name == "testdata" {
 		return true
 	}
+	// .holon packages are handled before this check — they are collected
+	// and skipped separately. Other dot-prefixed dirs are excluded.
 	return strings.HasPrefix(name, ".")
+}
+
+// holonFromPackageDir reads .holon.json from a .holon package directory
+// and returns a LocalHolon entry. Returns false if the package cannot be read.
+func holonFromPackageDir(pkgDir, absRoot, origin string, relPath func(string, string) string) (LocalHolon, bool) {
+	pkg, err := readHolonPackageJSON(pkgDir)
+	if err != nil {
+		return LocalHolon{}, false
+	}
+	if pkg.Identity.GivenName == "" && pkg.Identity.FamilyName == "" {
+		return LocalHolon{}, false
+	}
+
+	id := identity.Identity{
+		Schema:     pkg.Schema,
+		UUID:       pkg.UUID,
+		GivenName:  pkg.Identity.GivenName,
+		FamilyName: pkg.Identity.FamilyName,
+		Motto:      pkg.Identity.Motto,
+		Status:     pkg.Status,
+		Lang:       pkg.Lang,
+	}
+
+	return LocalHolon{
+		Dir:          pkgDir,
+		RelativePath: relPath(absRoot, pkgDir),
+		Origin:       origin,
+		Identity:     id,
+		IdentityPath: filepath.Join(pkgDir, ".holon.json"),
+	}, true
+}
+
+// readHolonPackageJSON reads and parses .holon.json from a package directory.
+func readHolonPackageJSON(pkgDir string) (*HolonPackageJSON, error) {
+	data, err := os.ReadFile(filepath.Join(pkgDir, ".holon.json"))
+	if err != nil {
+		return nil, err
+	}
+	var pkg HolonPackageJSON
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil, err
+	}
+	return &pkg, nil
 }
 
 var protoVersionDirPattern = regexp.MustCompile(`^v[0-9]+(?:[A-Za-z0-9._-]*)?$`)
@@ -468,21 +536,17 @@ func collectUUIDMatches(ref string) ([]LocalHolon, error) {
 }
 
 func filterHolonsBySlug(holons []LocalHolon, ref string) []LocalHolon {
-	trimmed := strings.TrimSpace(ref)
-	lowered := strings.ToLower(trimmed)
+	lowered := strings.ToLower(strings.TrimSpace(ref))
 	matches := make([]LocalHolon, 0)
 	for _, holon := range holons {
-		// Match by directory basename (traditional slug)
-		if filepath.Base(holon.Dir) == trimmed {
+		if holonDirSlug(holon.Dir) == lowered {
 			matches = append(matches, holon)
 			continue
 		}
-		// Match by identity-derived slug (given_name + family_name)
-		if idSlug := holon.Identity.Slug(); idSlug != "" && idSlug == trimmed {
+		if idSlug := holon.Identity.Slug(); idSlug != "" && idSlug == lowered {
 			matches = append(matches, holon)
 			continue
 		}
-		// Match by declared alias (case-insensitive)
 		for _, alias := range holon.Identity.Aliases {
 			if strings.ToLower(strings.TrimSpace(alias)) == lowered {
 				matches = append(matches, holon)
@@ -491,6 +555,16 @@ func filterHolonsBySlug(holons []LocalHolon, ref string) []LocalHolon {
 		}
 	}
 	return matches
+}
+
+// holonDirSlug returns the canonical slug from a holon directory path,
+// stripping the .holon suffix when present.
+func holonDirSlug(dir string) string {
+	base := strings.ToLower(filepath.Base(dir))
+	if isHolonPackagePath(base) {
+		return strings.TrimSuffix(base, ".holon")
+	}
+	return base
 }
 
 func filterHolonsByUUID(holons []LocalHolon, ref string) []LocalHolon {
@@ -568,15 +642,31 @@ func shortUUIDValue(uuid string) string {
 }
 
 func builtBinaryForTarget(target *Target) string {
-	if target == nil || target.Manifest == nil {
+	if target == nil {
 		return ""
 	}
-	binaryPath := target.Manifest.BinaryPath()
-	if binaryPath == "" {
-		return ""
+	// Standard manifest path.
+	if target.Manifest != nil {
+		binaryPath := target.Manifest.BinaryPath()
+		if binaryPath != "" {
+			if info, err := os.Stat(binaryPath); err == nil && !info.IsDir() {
+				return binaryPath
+			}
+		}
 	}
-	if info, err := os.Stat(binaryPath); err == nil && !info.IsDir() {
-		return binaryPath
+	// .holon package path: use .holon.json entrypoint + PackageBinaryPath.
+	if isHolonPackagePath(target.Dir) {
+		if pkg, err := readHolonPackageJSON(target.Dir); err == nil && pkg.Entrypoint != "" {
+			if bp := PackageBinaryPath(target.Dir, pkg.Entrypoint); bp != "" {
+				if info, err := os.Stat(bp); err == nil && !info.IsDir() {
+					return bp
+				}
+			}
+		}
+		// Fallback: probe any binary in the package.
+		if bp := firstLaunchableBinaryInPackage(target.Dir, holonDirSlug(target.Dir)); bp != "" {
+			return bp
+		}
 	}
 	return ""
 }
@@ -755,6 +845,11 @@ func existingTargetDir(ref string) (string, bool, error) {
 	info, err := os.Stat(ref)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Try <ref>.holon as a package directory.
+			pkgPath := ref + ".holon"
+			if pkgInfo, pkgErr := os.Stat(pkgPath); pkgErr == nil && pkgInfo.IsDir() {
+				return pkgPath, true, nil
+			}
 			return "", false, nil
 		}
 		return "", false, err
