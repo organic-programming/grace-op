@@ -2412,10 +2412,10 @@ func TestParseGlobalFormat(t *testing.T) {
 			wantArgs:   []string{"who", "list"},
 		},
 		{
-			name:       "flag after command is not global",
+			name:       "flag after command is still global",
 			args:       []string{"who", "-f", "json", "list"},
-			wantFormat: FormatText,
-			wantArgs:   []string{"who", "-f", "json", "list"},
+			wantFormat: FormatJSON,
+			wantArgs:   []string{"who", "list"},
 		},
 		{
 			name:    "invalid format",
@@ -2457,14 +2457,14 @@ func TestParseGlobalFormat(t *testing.T) {
 }
 
 func TestParseGlobalOptions(t *testing.T) {
-	format, quiet, args, err := parseGlobalOptions([]string{"-q", "--format", "json", "build", "."})
+	gopts, args, err := parseGlobalOptions([]string{"-q", "--format", "json", "build", "."})
 	if err != nil {
 		t.Fatalf("parseGlobalOptions returned error: %v", err)
 	}
-	if format != FormatJSON {
-		t.Fatalf("format = %q, want %q", format, FormatJSON)
+	if gopts.format != FormatJSON {
+		t.Fatalf("format = %q, want %q", gopts.format, FormatJSON)
 	}
-	if !quiet {
+	if !gopts.quiet {
 		t.Fatal("quiet = false, want true")
 	}
 	if len(args) != 2 || args[0] != "build" || args[1] != "." {

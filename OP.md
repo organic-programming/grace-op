@@ -15,12 +15,15 @@ op — the Organic Programming CLI
 Global flags (must come before <holon> or URI):
   -f, --format <text|json>              output format for RPC responses (default: text)
   -q, --quiet                           suppress progress and suggestions
+  --root <path>                         override discovery root (default: cwd)
+  --bin <slug>                          print the resolved binary path and exit
 
 Holon dispatch (transport chain):
   op <holon> <command> [args]            dispatch via the SDK auto-connect chain
   op <holon> --clean <method> [--no-build] [json]
   op <holon> <method> [--no-build] [json]
                                          call a holon RPC; auto-build compiled slugs if needed
+  op <binary-path> <method> [json]       call an executable directly (no discovery)
 
 Direct gRPC URI dispatch:
   op grpc://<slug|host:port> <method>    gRPC auto-connect for slugs, direct TCP for host:port
@@ -186,6 +189,7 @@ constraints come from two places, not from `op`:
 |---|---|---|
 | `OPPATH` | `~/.op` | User-local runtime home for all OP data |
 | `OPBIN` | `$OPPATH/bin` | Canonical install directory for holon binaries |
+| `OPROOT` | cwd | Override the discovery root (set automatically by `--root`) |
 
 Resolution: explicit env var if set, otherwise the default.
 
@@ -594,8 +598,19 @@ for subsequent scans.
 
 The effective local root is:
 
-1. the explicit root argument when a command accepts one
-2. otherwise the current working directory
+1. the value of `--root <path>` (sets `OPROOT` env var)
+2. the `OPROOT` env var if set directly
+3. the explicit root argument when a command accepts one
+4. otherwise the current working directory
+
+```bash
+# Override discovery root for a single call:
+op --root ~/Desktop/isolated gabriel-greeting-go SayHello '{"name":"","lang_code":"fr"}'
+
+# Print the resolved binary path (--bin):
+op --bin gabriel-greeting-go
+# → /path/to/.op/build/grace-op.holon/bin/darwin_arm64/gabriel-greeting-go
+```
 
 Discovery then scans recursively for every `api/v1/holon.proto` under that
 root. There is no requirement that holons live only under fixed
@@ -923,6 +938,20 @@ op rob-go build '{"package":"./..."}'
 op gabriel-greeting-go greet '{"name":"World"}'
 op gabriel-greeting-c greet '{"name":"World"}'
 ```
+
+### `op <binary-path> <method> [json]`
+
+Call an executable directly — no discovery, no slug resolution.
+The first argument must be an **existing executable file** (contains
+`/` or `.`, and has the executable bit set). `op` launches it via
+`stdio://` and invokes the RPC:
+
+```bash
+op ./.op/build/grace-op.holon/bin/darwin_arm64/gabriel-greeting-go SayHello '{"name":"World"}'
+```
+
+If the file does not exist or is not executable, `op` falls through
+to slug resolution.
 
 The command is mapped to an RPC method name:
 

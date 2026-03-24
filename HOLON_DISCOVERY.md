@@ -116,4 +116,55 @@ from `.holon.json`. Fields to **add** to `.holon.json` and the proto:
 
 `--format json` outputs all available fields from `.holon.json` per entry.
 
+---
 
+## Resolution Overrides
+
+Three mechanisms bypass or constrain the default discovery[^1].
+
+### `--root` — scoped discovery
+
+Override the effective root so `op` scans a different directory tree:
+
+```bash
+# Call a holon discovered under ~/Desktop/isolated, not cwd:
+op --root ~/Desktop/isolated gabriel-greeting-go SayHello '{"name":"","lang_code":"fr"}'
+# → {"greeting":"Bonjour Marie","language":"French","langCode":"fr"}
+
+# List holons under a specific directory:
+op --root ~/Desktop/isolated discover
+```
+
+Sets `OPROOT` env var for the duration of the command.
+All downstream discovery (`ResolveBinary`, `DiscoverHolons`) reads
+`OPROOT` via `env.Root()`.
+
+### `--bin` — print resolved binary path
+
+Print the absolute binary path for a slug and exit (no RPC call):
+
+```bash
+op --bin gabriel-greeting-go
+# → /Users/Bob/.op/bin/grace-op.holon/bin/darwin_arm64/gabriel-greeting-go
+
+# Combine with --root for scoped resolution:
+op --root ~/Desktop/isolated --bin gabriel-greeting-go
+```
+
+### Direct binary dispatch
+
+When the first argument is an **existing executable file**, `op`
+launches it via `stdio://` with no discovery[^2]:
+
+```bash
+op ./.op/build/grace-op.holon/bin/darwin_arm64/gabriel-greeting-go \
+   SayHello '{"name":"World"}'
+```
+
+Detection heuristic: the argument must contain `/`, `\`, or `.`,
+point to an existing non-directory file, and have the executable
+bit set. If the file does not exist, `op` falls through to slug
+resolution.
+
+[^1]: All three are global flags parsed before command dispatch.
+[^2]: The binary is launched with `serve --listen stdio://`, same as `grpc+stdio://`.

@@ -32,7 +32,11 @@ func CacheDir() string {
 }
 
 // Root returns the current effective root for commands run from cwd.
+// Setting OPROOT overrides cwd (used by --root).
 func Root() string {
+	if override := strings.TrimSpace(os.Getenv("OPROOT")); override != "" {
+		return cleanOrFallback(override)
+	}
 	cwd, err := os.Getwd()
 	if err != nil || strings.TrimSpace(cwd) == "" {
 		return "."
