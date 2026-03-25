@@ -1,6 +1,7 @@
 # Holon Discovery Spec
 
-Status: draft
+Status: draft, 
+⚠️Partially implemented this document is the source of truth but the code may not be fully aligned.⚠️ 
 
 ---
 
@@ -23,8 +24,10 @@ $OPBIN/
 
 ## Discovery Algorithm
 
-This algorithm is a **cross-SDK spec**. Every SDK (Go, Swift, Rust, Dart,
-Python, Node) implements the same logic.
+This algorithm is a **cross-SDK spec**. 
+Every SDK implements the same logic.
+c, c++, c#, dart, go, java, js, js-web, kotlin, python, ruby, rust, swift. 
+
 
 ### Scan
 
