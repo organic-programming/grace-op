@@ -175,7 +175,7 @@ func stageHolonProtos(manifest *LoadedManifest, destDir string) ([]string, error
 		if d.IsDir() {
 			base := d.Name()
 			// Skip build output, hidden dirs, vendor, node_modules, Python venvs.
-			if base == ".op" || base == ".git" || base == ".build" ||
+			if base == ".op" || base == ".git" || base == ".build" || base == "build" ||
 				base == "vendor" || base == "node_modules" || base == "gen" ||
 				base == ".venv" || base == "__pycache__" || base == ".bundle" {
 				return filepath.SkipDir
