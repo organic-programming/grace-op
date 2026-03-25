@@ -435,7 +435,7 @@ Jack's motto — *"I see everything"* — now belongs to `op proxy`.
 
 ## Security Integration
 
-Each adapter inherits the security stack from PROTOCOL.md:
+Each adapter inherits the security stack from COMMUNICATION.md:
 
 | Adapter | Auth options |
 |---------|-------------|
@@ -458,7 +458,7 @@ proxy:
     security: mesh
 ```
 
-This is the `ACL · Routing (planned)` layer from PROTOCOL.md —
+This is the `ACL · Routing (planned)` layer from COMMUNICATION.md —
 `op proxy` is where it materializes.
 
 ---
@@ -480,7 +480,7 @@ to any holon without SDK changes.
 
 ## What Does Not Change
 
-- **PROTOCOL.md** — wire formats and transports are unchanged.
+- **COMMUNICATION.md** — wire formats and transports are unchanged.
   `op proxy` speaks those protocols on both sides.
 - **Holon contracts** — holons are unmodified. They see standard
   gRPC calls on stdio/tcp.

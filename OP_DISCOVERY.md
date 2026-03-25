@@ -21,6 +21,25 @@ This document covers `op`-specific CLI behavior.
 
 ---
 
+## Working Samples
+
+```bash
+# List all discovered holons across all layers
+op list
+
+# List only source holons and installed packages
+op list --source --installed
+
+# Run a holon, forcing a scan from a specific root
+op run gabriel-greeting-go --root /path/to/my/app
+
+# Ensure resolution prefers locally built packages before checking installed ones
+# (Order of flags does not matter; layer priority is fixed)
+op inspect gabriel-greeting-go --built --installed
+```
+
+---
+
 ## Command Special Cases
 
 ```shell

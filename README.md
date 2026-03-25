@@ -3,7 +3,7 @@
 > *"One command, every holon."*
 
 OP discovers holons, builds them, manages their identities, and
-dispatches commands — all from a single binary.
+dispatches commands, and more — all from a single binary.
 
 ## Install
 
@@ -116,12 +116,12 @@ Outputs:
 ## Documentation
 
 - [OP.md](OP.md) — full documentation (manifest, discovery, lifecycle, transport)
-- [HOLON_DISCOVERY.md](./HOLON_DISCOVERY) 
-- [HOLON_BUILD.md](./HOLON_BUILD.md) — `op build` specification
-- [HOLON_PROTO.md](./HOLON_PROTO.md) — proto manifest authoring guide
+- [OP_DISCOVERY.md](./OP_DISCOVERY) - how does op commands handle [discovery](../../DISCOVERY.md) 
+- [OP_BUILD.md](./OP_BUILD.md) — `op build` specification
+- [PROTO.md](../../PROTO.md) — proto manifest authoring guide
 - [HOLON_PACKAGE.md](./HOLON_PACKAGE.md) — `.holon` package format
 
 ## Organic Programming
 
 Part of the [Organic Programming](https://github.com/organic-programming/seed)
-ecosystem. See the [Constitution](https://github.com/organic-programming/seed/blob/master/AGENT.md).
+ecosystem. See the [Constitution](https://github.com/organic-programming/seed/blob/master/CONSTITUTION.md).

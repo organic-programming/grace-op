@@ -306,7 +306,7 @@ option (holons.v1.manifest) = {
 ```
 
 For the authoritative field definitions, see
-[HOLON_PROTO.md](./HOLON_PROTO.md) and
+[PROTO.md](../../PROTO.md) and
 [`_protos/holons/v1/manifest.proto`](./_protos/holons/v1/manifest.proto).
 
 ### Identity fields

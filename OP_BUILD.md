@@ -502,8 +502,8 @@ steps: {
 The codesigning step runs automatically before any `assert_file` step
 when the primary artifact is a `.app` or `.framework` bundle.
 
-See `HOLON_PACKAGE.md` "Bundle Integration" for the full embedded
-package layout and discovery semantics.
+See [HOLON_PACKAGE.md](./HOLON_PACKAGE.md) "Bundle Integration" for the full embedded
+package layout and [OP_DISCOVERY.md](./OP_DISCOVERY.md) for discovery semantics.
 
 ## Build Output
 
